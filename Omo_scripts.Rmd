@@ -1,0 +1,2229 @@
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+options(knitr.kable.NA = '')
+library(MASS)
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+library(ggplot2)
+library(ggrepel)
+library(tibble)
+library(dplyr)
+```
+
+```{r omo, message=FALSE, warning=FALSE, cache=FALSE, include=FALSE}
+# Load data from Omo datasheet
+library(readxl)
+url_win_omo <- "C:/Users/mario.modesto/Dropbox/DATABASES/Sent DDBB/Hominidae_OMO_2022.11.10.xlsx"
+url_linux_omo <- "/home/mario/Dropbox/DATABASES/Sent DDBB/Hominidae_OMO_2022.11.10.xlsx"
+
+omo <- read_excel(url_win_omo, na = "na")
+
+# convert to numeric data
+# https://stackoverflow.com/questions/55214600/run-a-function-across-multiple-columns
+# https://stackoverflow.com/questions/3357743/replacing-character-values-with-na-in-a-data-frame
+library(dplyr)
+omo_numeric <- omo %>% 
+  mutate_at(vars(MD1, MD2, MD3,
+                 mBL1, mBL2, mBL3,
+                 dBL1, dBL2, dBL3), as.numeric)
+
+# mean MD1 MD2 MD3
+# https://www.statology.org/average-across-columns-in-r/
+omo_numeric$MD       <- rowMeans(omo_numeric[ , c("MD1", "MD2", "MD3")], na.rm=TRUE)
+omo_numeric$mBL_mean <- rowMeans(omo_numeric[ , c("mBL1", "mBL2", "mBL3")], na.rm=TRUE)
+omo_numeric$dBL_mean <- rowMeans(omo_numeric[ , c("dBL1", "dBL2", "dBL3")], na.rm=TRUE)
+
+# create new column with the highest value of BL diameter
+# esto al final no lo hacemos porque solo vamos a coger mBL (basado en correos con Leslea 22 enero 2024)
+# https://stackoverflow.com/questions/70706514/creating-new-column-based-on-highest-values
+# omo_numeric_mdbl <- omo_numeric %>%
+#   mutate(BL = pmax(mBL_mean, dBL_mean, na.rm = TRUE))
+
+# aquí hacemos que mBL sea BL, para ajustarse a los datos, según Leslea 22 enero 2024
+omo_numeric_mdbl <- omo_numeric %>%
+   mutate(BL = mBL_mean)
+
+
+# remove numbers from "Intervalle stratigraphique"
+# https://statisticsglobe.com/remove-numbers-from-character-string-r
+# https://www.geeksforgeeks.org/remove-all-white-space-from-character-string-in-r/
+omo_numeric_mdbl$Stratigraphy <- gsub("[[:digit:]]", "", omo_numeric_mdbl$`Intervalle stratigraphique...23`)
+omo_numeric_mdbl$Stratigraphy <- gsub(" ", "", omo_numeric_mdbl$Stratigraphy) # remove spaces
+
+# extract tooth and position from text string
+library(stringr)
+omo_numeric_mdbl$Tooth    <- stringr::str_extract(omo_numeric_mdbl$element, "\\w\\d")
+omo_numeric_mdbl$Position <- ifelse(stringr::str_detect(omo_numeric_mdbl$element,"[[:upper:]]"), "U", "L")
+
+# Creation of two extra numeric variables
+omo_numeric_mdbl$Size  <- omo_numeric_mdbl$MD * omo_numeric_mdbl$BL
+omo_numeric_mdbl$Shape <- omo_numeric_mdbl$MD / omo_numeric_mdbl$BL
+
+# Eliminar los dientes asignados de P. aethiopicus en KDD (de Suwa et al 1996) y también L 894-1 que están en Tobias Olduvai (y es Homo habilis)
+# Y que están también en la hoja de Omo
+omo_numeric_mdbl <- subset(omo_numeric_mdbl, 
+                           # Paranthropus aethiopicus
+                   Inventaire!="OMO 18-1968-31" &
+                   Inventaire!="L 398-120" &
+                   Inventaire!="L 51-79" &
+                   Inventaire!="L 338/X-40" &
+                   Inventaire!="OMO 33-1971-508" &
+                   Inventaire!="OMO 18-1968-34" &
+                   Inventaire!="L 62-17" &
+                   Inventaire!="F 22-1a" &
+                   Inventaire!="L 157-35" &
+                   Inventaire!="L 338/X-39" &
+                   Inventaire!="OMO 33-1969-9" &
+                   Inventaire!="F 22-1b" &
+                   Inventaire!="L 55-33" &
+                   Inventaire!="L 860-2b" &
+                   Inventaire!="L 860-2d" &
+                   Inventaire!="L 860-2a" &
+                   # Alemnseged et al  2002 - P. boisei
+                   Inventaire!="OMO 323-1976-896B,O,P,U_P3" &
+                   Inventaire!="OMO 323-1976-896B,O,P,U_P4" &
+                   Inventaire!="OMO 323-1976-896B,O,P,U_M1" &
+                   # Homo habilis | el 5 de marzo 2024 Leslea envía un email de que incluyamos estos dientes en el análisis
+                   # Inventaire!="L 894-1a" &
+                   # Inventaire!="L 894-1b" &
+                   # Inventaire!="L 894-1c" &
+                   # Inventaire!="L 894-1d" &
+                   # Inventaire!="L 894-1e" &
+                   # Inventaire!="L 894-1f" &
+                   # Inventaire!="L 894-1g" &
+                   # Inventaire!="L 894-1h" &
+                   # Inventaire!="L 894-1i" &
+                   # Inventaire!="L 894-1a-i" &
+                   # el diente siguiente, W 8-753 se decidió en correo de Leslea del 13 de marzo de 2024 que era un deciduo, así que lo eliminamos 
+                   # en un correo del 9 de julio de 2024, Leslea consideró nuevamente el W 8-753 como un molar superior
+                   Inventaire!="W 8-753" &
+                   # quitamos OMO 362-10001 porque es para un estudio posterior
+                   # Viene de Marina en mayo 2023
+                   Inventaire!="OMO 362-10001"
+                 )
+
+write.csv(omo_numeric_mdbl, "omo_numeric_mdbl.csv")
+
+# Comprobación de los dientes
+
+omo_numeric_mdbl_comp <- omo_numeric_mdbl
+  omo_numeric_mdbl_comp$dienteR <- omo_numeric_mdbl_comp$Tooth
+omo_numeric_mdbl_comp$dienteO <- omo_numeric_mdbl_comp$element
+
+# ggplot MD vs BL
+library(ggplot2)
+ggplot(omo_numeric_mdbl, aes(x=MD, y=BL, color=as.factor(Stratigraphy))) + 
+  geom_point()
+```
+
+
+```{r kddleslea, message=FALSE, warning=FALSE, cache=TRUE, include=FALSE}
+# load new database from Leslea
+library(readxl)
+url_win_kdd_leslea <- "ComparativeDataset_29dec2023.xlsx"
+diameter_leslea <- read_excel(url_win_kdd_leslea, sheet = "all data")
+colnames(diameter_leslea) <- c("Species", "Genera", "Species2", "Specimen", "Tooth", "Position", "Side", "MD", "BL", "Size", "Shape", "Reference")
+diameter_leslea <- as.data.frame(diameter_leslea[,c(1:12)])
+
+# replace A.bah by A. afa, and Homo, h.habilis y rudolfensis por Homo early eastern African (correo de Leslea 19 enero 2024)
+# a petición de 9 de julio de 2024 de Leslea, convertimos las "Au. afarensis" en "Australopithecus LP
+diameter_leslea$Species[diameter_leslea$Species == 'Australopithecus bahrelghazali'] <- 'Australopithecus afarensis'
+diameter_leslea$Species[diameter_leslea$Species == 'Homo'] <- 'Homo early eastern African'
+diameter_leslea$Species[diameter_leslea$Species == 'Homo habilis'] <- 'Homo early eastern African'
+diameter_leslea$Species[diameter_leslea$Species == 'Homo rudolfensis'] <- 'Homo early eastern African'
+
+diameter_leslea$Species[diameter_leslea$Species == 'Au. afarensis'] <- 'Australopithecus LP'
+
+# remove complete rows with NA and some columns / sort by Specimen
+library(tidyr)
+diameter_mdbl_species_samples_leslea <- diameter_leslea[,c("Species", 
+                                                          "Specimen", 
+                                                          "Tooth", "Position", "Side", 
+                                                          "MD", "BL", 
+                                                          "Reference")]
+diameter_mdbl_species_samples_leslea <- diameter_mdbl_species_samples_leslea[order(diameter_mdbl_species_samples_leslea$Specimen, decreasing = F),] # sort dataframe based on the column Specimen (A->Z)
+```
+
+# Sample size tables
+
+```{r sample_size sp, echo=FALSE}
+sample_size <- table(diameter_leslea$Species, 
+      diameter_leslea$Tooth,
+      diameter_leslea$Position)
+
+sample_size_df <- as.data.frame(sample_size)
+colnames(sample_size_df) <- c("Species", "Tooth", "Position", "Frequency")
+
+library(tidyr)
+sample_size_df_kb <- sample_size_df %>%
+  pivot_wider(names_from = Tooth, values_from = Frequency)
+
+library(kableExtra)
+kable(sample_size_df_kb) %>%
+  kable_classic(full_width = T, 
+                  html_font = "Cambria", 
+                  font_size = 10) %>%
+  column_spec(1, italic = T)
+
+sum(sample_size_df_kb[,c(3:7)])
+```
+
+> \small
+`r table_number(name = "samsize_sp", caption = "Sample size of the comparative sample by using tooth types and species.")`
+
+```{r size ge, echo=FALSE}
+sample_size_gen <- table(diameter_leslea$Genera, 
+      diameter_leslea$Tooth,
+      diameter_leslea$Position)
+
+sample_size_gen_df <- as.data.frame(sample_size_gen)
+colnames(sample_size_gen_df) <- c("Genera", "Tooth", "Position", "Frequency")
+
+library(tidyr)
+sample_size_df_gen_kb <- sample_size_gen_df %>%
+  pivot_wider(names_from = Tooth, values_from = Frequency)
+
+kable(sample_size_df_gen_kb) %>%
+  kable_classic(full_width = T, 
+                  html_font = "Cambria", 
+                  font_size = 10) %>%
+  column_spec(1, italic = T)
+
+sum(sample_size_df_gen_kb[,c(3:7)])
+```
+
+> \small
+`r table_number(name = "samsize_ge", caption = "Sample size of the comparative sample by using tooth types and genera.")`
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+# Creamos los dataframes de cada diente individual y eliminamos las filas que tengan menos de 3 individuos por especie
+# https://stackoverflow.com/questions/35271988/how-to-delete-groups-containing-less-than-3-rows-of-data-in-r
+
+M1lower <- diameter_leslea[diameter_leslea$Tooth == "M1" & diameter_leslea$Position == "L",] %>% 
+  group_by(Species) #%>% 
+  #filter(n() >= 3)
+M2lower <- diameter_leslea[diameter_leslea$Tooth == "M2" & diameter_leslea$Position == "L",] %>% 
+  group_by(Species) #%>% 
+  #filter(n() >= 3)
+M3lower <- diameter_leslea[diameter_leslea$Tooth == "M3" & diameter_leslea$Position == "L",] %>% 
+  group_by(Species) #%>% 
+  #filter(n() >= 3)
+M1upper <- diameter_leslea[diameter_leslea$Tooth == "M1" & diameter_leslea$Position == "U",] %>% 
+  group_by(Species) #%>% 
+  #filter(n() >= 3)
+M2upper <- diameter_leslea[diameter_leslea$Tooth == "M2" & diameter_leslea$Position == "U",] %>% 
+  group_by(Species) #%>% 
+  #filter(n() >= 3)
+M3upper <- diameter_leslea[diameter_leslea$Tooth == "M3" & diameter_leslea$Position == "U",] %>% 
+  group_by(Species) #%>% 
+  #filter(n() >= 3)
+P3lower <- diameter_leslea[diameter_leslea$Tooth == "P3" & diameter_leslea$Position == "L",] %>% 
+  group_by(Species) #%>% 
+  #filter(n() >= 3)
+P4lower <- diameter_leslea[diameter_leslea$Tooth == "P4" & diameter_leslea$Position == "L",] %>% 
+  group_by(Species) #%>% 
+  #filter(n() >= 3)
+P3upper <- diameter_leslea[diameter_leslea$Tooth == "P3" & diameter_leslea$Position == "U",] %>% 
+  group_by(Species) #%>% 
+  #filter(n() >= 3)
+P4upper <- diameter_leslea[diameter_leslea$Tooth == "P4" & diameter_leslea$Position == "U",] %>% 
+  group_by(Species) #%>% 
+  #filter(n() >= 3)
+```
+
+
+# Analysis taking into account species
+
+The coefficients of the linear discriminant functions for each tooth type can be seen in `r table_number("lda_coef_sp", display="cite")` 
+
+```{r lda sp fun, echo=FALSE, message=FALSE, warning=FALSE}
+# creamos la función para correr los LDA.
+
+library(scales)
+library(dplyr)
+library(ggtext)
+lda_omo <- function(data,
+                    tooth_type = c("m1", "m2", "m3", "M1", "M2",
+                                   "M3", "P3", "P4", "p3", "p4"), 
+                    position = c("U", "L")) {
+  
+  # LDA - http://www.sthda.com/english/articles/36-classification-methods-essentials/146-discriminant-analysis-essentials-in-r/
+  model <- lda(Species ~ scale(MD) + scale(BL) + scale(Size) + scale(Shape), data = data) 
+    tooth <- omo_numeric_mdbl
+    # Eliminamos la columna "element 2"
+    tooth <- within(tooth, rm("element 2"))
+    tooth <- tooth[tooth$Tooth == tooth_type & tooth$Position == position, ]
+    # Hacemos que se queden solo las líneas que tienen datos en columnas 31 y 32, que son Tooth y Position
+    tooth <- tooth[complete.cases(tooth[, 31:32]), ]
+  
+  # PREDICTION
+  predictions <- model %>%
+    predict(tooth)
+  pred <- as.data.frame(predictions$posterior)*100
+    pred$Tooth_ID <- tooth$Inventaire
+    pred$Stratigraphy <- tooth$`Intervalle stratigraphique...6`
+    pred$MD <- tooth$MD
+    pred$BL <- tooth$BL
+    pred$Prediction <- as.character(predictions$class)
+  xpred <- as.data.frame(predictions$x) # table with LD1 and LD2 values of Omo
+    pred$LD1 <- xpred$LD1
+    pred$LD2 <- xpred$LD2
+  
+  # Aquí enlazamos colores con grupos concretos
+  # https://stackoverflow.com/questions/17180115/manually-setting-group-colors-for-ggplot2
+  # https://www.datanovia.com/en/blog/top-r-color-palettes-to-know-for-great-data-visualization/
+    # RColorBrewuer - BLUES AUSTRA / 
+    # brewer.pal(n = 9, name = "Blues") AUSTRALOPITHECUS
+    # brewer.pal(n = 9, name = "Oranges") PARANTHROPUS
+    # brewer.pal(n = 9, name = "Greens") HOMO
+    
+  group.colors <- c(`Australopithecus LP`  = "#08306B", 
+                    `Au. anamensis`  = "#08306B", 
+                    `Au. deyiremeda` = "#08306B", 
+                    `Au. garhi`      = "#08306B", 
+                    `H. erectus`                = "#006D2C",
+                    `Homo EEA`  = "#006D2C",
+                    `P. boisei`         = "#A63603",
+                    `P. aethiopicus`    = "#A63603",
+                    `Ar. ramidus`        = "red",
+                    `Ar. kadabba`        = "red")
+  
+  group.shapes <- c(`Australopithecus LP`  = 0, 
+                    `Au. anamensis`  = 7, 
+                    `Au. deyiremeda` = 12, 
+                    `Au. garhi`      = 14, 
+                    `H. erectus`                = 2,
+                    `Homo EEA`  = 6,
+                    `P. boisei`         = 1,
+                    `P. aethiopicus`    = 10,
+                    `Ar. ramidus`        = 3,
+                    `Ar. kadabba`        = 4)
+  # PLOT
+  lda.data <- cbind(data, predict(model)$x)
+  hull_data <- # https://datavizpyr.com/how-to-highlight-groups-with-convex-hull-in-ggplot2/
+    lda.data %>%
+    #drop_na() %>%
+    group_by(Species) %>%
+    slice(chull(LD1, LD2))
+  ggplot_omo <- ggplot(lda.data, aes(LD1, LD2)) +
+    geom_hline(yintercept = 0, lty = 2, lwd = 0.5, alpha = 0.15) + 
+    geom_vline(xintercept = 0, lty = 2, lwd = 0.5, alpha = 0.15) + # https://stackoverflow.com/questions/14806627/getting-the-name-of-a-data-frame
+    # ggtitle(deparse(substitute(data))) + 
+    geom_polygon(data = hull_data, aes(fill = Species, colour = Species), 
+                 alpha = 0.3, show.legend = FALSE, linetype = "blank") +
+    geom_point(aes(fill = Species, colour = Species, shape = Species), size = 2, alpha = 0.4) +
+    scale_fill_manual (values = group.colors) +
+    scale_shape_manual(values = group.shapes) +
+    scale_color_manual(values = group.colors) +
+    scale_y_continuous(breaks=seq(-40,40,1)) +
+    scale_x_continuous(breaks=seq(-40,40,1)) +
+    geom_point(data=pred, aes(x=LD1, y=LD2), 
+               fill = "black", colour = "black", shape = 20, size = 2) +
+    geom_text_repel(data=pred,
+      aes(x=LD1, y=LD2, label = Tooth_ID), fill = "black", colour = "black",
+      size = 2) +
+    theme_minimal() +
+    theme(legend.text = element_text(face = "italic", size = 6),
+          legend.position="bottom",
+          legend.key.size = unit(0.4, "cm"),
+          legend.title=element_blank(),
+          panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+          axis.line = element_line(colour = "gray90")) +
+    guides(fill=guide_legend(nrow=3, byrow=TRUE))
+
+
+  # OUTPUT LIST
+  list(Tooth_DB = tooth,
+       LDA = model, 
+       Prediction = pred, 
+       GGPLOT = ggplot_omo)
+}
+```
+
+```{r lda sp run, echo=FALSE, message=FALSE, warning=FALSE}
+#We run the function and store the results.
+# data = M1lower (from the Skinner paper and database mdbl)
+library(MASS)
+library(ggrepel)
+lda_omo_M1lower <- lda_omo(M1lower, "m1", "L")
+lda_omo_M2lower <- lda_omo(M2lower, "m2", "L")
+lda_omo_M3lower <- lda_omo(M3lower, "m3", "L")
+lda_omo_M1upper <- lda_omo(M1upper, "M1", "U")
+lda_omo_M2upper <- lda_omo(M2upper, "M2", "U")
+lda_omo_M3upper <- lda_omo(M3upper, "M3", "U")
+lda_omo_P3lower <- lda_omo(P3lower, "p3", "L")
+lda_omo_P4lower <- lda_omo(P4lower, "p4", "L")
+lda_omo_P3upper <- lda_omo(P3upper, "P3", "U")
+lda_omo_P4upper <- lda_omo(P4upper, "P4", "U")
+
+lda_omo_teeth <- list(P3_lower = lda_omo_P3lower, P3_upper = lda_omo_P3upper,
+                      P4_lower = lda_omo_P4lower, P4_upper = lda_omo_P4upper,
+                      M1_lower = lda_omo_M1lower, M1_upper = lda_omo_M1upper,
+                      M2_lower = lda_omo_M2lower, M2_upper = lda_omo_M2upper,
+                      M3_lower = lda_omo_M3lower, M3_upper = lda_omo_M3upper)
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+#| layout-ncol: 2
+
+lda_omo_coef <- function(data) {
+  data$LDA$scaling
+}
+
+kable_coef <- lapply(lda_omo_teeth, lda_omo_coef)
+
+kable(list(kable_coef$P3_upper, kable_coef$P4_upper), 
+      caption = "Upper P3 and P4", digits = 2) %>%
+    kable_classic(full_width = F, 
+                  html_font = "Cambria", 
+                  font_size = 10)
+kable(list(kable_coef$P3_lower, kable_coef$P4_lower), 
+      caption = "Lower P3 and P4", digits = 2) %>%
+    kable_classic(full_width = F, 
+                  html_font = "Cambria", 
+                  font_size = 10)
+kable(list(kable_coef$M1_upper, kable_coef$M2_upper, kable_coef$M3_upper), 
+      caption = "Upper M1, M2 and M3", digits = 2) %>%
+    kable_classic(full_width = F, 
+                  html_font = "Cambria", 
+                  font_size = 10)
+kable(list(kable_coef$M1_lower, kable_coef$M2_lower, kable_coef$M3_lower), 
+      caption = "Lower M1, M2 and M3", digits = 2) %>%
+    kable_classic(full_width = F, 
+                  html_font = "Cambria", 
+                  font_size = 10)
+```
+
+> \small
+`r table_number(name = "lda_coef_sp", caption = "Linear discriminant coefficients for each tooth type and function.")`
+
+### Proportion of variance
+
+Proportion of variance explained by the discriminant functions can be seen in `r table_number("prop_sp", display="cite")` 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+lda_omo_summary <- function(data) {
+  # https://stackoverflow.com/questions/23163157/extract-lda-linear-discriminant-analysis-data-in-r
+  Prop_Trace <- prop.table(data$LDA$svd^2)
+  Prop_Trace <- Prop_Trace[1:2]
+  list(`Proportion of Trace` = Prop_Trace)
+}
+
+la <- lapply(lda_omo_teeth, lda_omo_summary)
+pr_tr <- data.frame(matrix(unlist(la), nrow=length(la), byrow=TRUE), stringsAsFactors=FALSE)*100
+pr_tr$Accum. <- pr_tr$X1 + pr_tr$X2
+pr_tr$Tooth_type <- names(la)
+colnames(pr_tr) <- c("LD1", "LD2", "LD1+LD2", "Tooth type")
+kable(pr_tr, digits = 2) %>%
+  kable_classic(full_width = F, 
+                  html_font = "Cambria", 
+                  font_size = 10)
+```
+
+> \small
+`r table_number(name = "prop_sp", caption = "Proportion of variance explained by the discriminant functions when we consider species.")`
+
+### Graphical representations
+
+```{r fig.height=20, fig.width=15, message=FALSE, warning=FALSE, echo=FALSE}
+omo_ggplot <- function(data) {
+  data$GGPLOT
+}
+
+omogg <- lapply(lda_omo_teeth, omo_ggplot)
+
+library(gridExtra)
+do.call("grid.arrange", c(omogg, ncol = 2))
+```
+
+### Accuracy of the predictions
+
+```{r fig.height=10, fig.width=15, message=FALSE, warning=FALSE, include=FALSE}
+# https://pages.cms.hu-berlin.de/EOL/gcg_quantitative-methods/Lab11_LDA_Model-assessment.html#Linear_Discriminant_Analysis
+# https://cran.r-project.org/web/packages/cvms/vignettes/Creating_a_confusion_matrix.html
+
+library(MASS)
+library(gmodels)
+library(cvms)
+library(tibble)
+library(ggplot2)
+library(caret)
+
+confusion_matrix_omo <- function(data){
+  lda_model <- lda(Species ~ scale(MD) + scale(BL) + scale(Size) + scale(Shape), data = data) 
+  lda_prediction <- predict(lda_model)
+  conf <- table(predicted=lda_prediction$class, observed=data$Species)
+  cfm <- as_tibble(conf)
+  conf2 <- CrossTable(lda_prediction$class, data$Species)
+  plot_cm <- plot_confusion_matrix(cfm, 
+                      target_col = "observed", 
+                      prediction_col = "predicted",
+                      counts_col = "n",
+                      add_normalized = F) +
+    ggtitle(deparse(substitute(data))) +
+    theme(axis.text.x = element_text(angle = 15),
+          axis.text.y = element_text(angle = 15))
+  
+  # how to get Accuracy of the predictions
+  # https://www.digitalocean.com/community/tutorials/confusion-matrix-in-r
+  acc <- confusionMatrix(data=factor(lda_prediction$class), reference = factor(data$Species))
+  
+  # OUTPUT LIST
+  list(Conf_Accuracy = acc,
+       Confusion_Matrix_Simple = conf, 
+       Confusion_Matrix_Complete = conf2, 
+       Plot_Conf_Matrix = plot_cm)
+}
+
+lda_kdd_teeth <- list(M1_lower = M1lower, M2_lower = M2lower, M3_lower = M3lower,
+                      M1_upper = M1upper, M2_upper = M2upper, M3_upper = M3upper,
+                      P3_lower = P3lower, P4_lower = P4lower,
+                      P3_upper = P3upper, P4_upper = P4upper)
+
+cm_M1L <- confusion_matrix_omo(M1lower)
+cm_M2L <- confusion_matrix_omo(M2lower)
+cm_M3L <- confusion_matrix_omo(M3lower)
+cm_M1U <- confusion_matrix_omo(M1upper)
+cm_M2U <- confusion_matrix_omo(M2upper)
+cm_M3U <- confusion_matrix_omo(M3upper)
+cm_P3L <- confusion_matrix_omo(P3lower)
+cm_P4L <- confusion_matrix_omo(P4lower)
+cm_P3U <- confusion_matrix_omo(P3upper)
+cm_P4U <- confusion_matrix_omo(P4upper)
+```
+
+```{r echo=FALSE}
+accuracy_model <- c(cm_M1L$Conf_Accuracy$overall[1],
+                    cm_M2L$Conf_Accuracy$overall[1],
+                    cm_M3L$Conf_Accuracy$overall[1],
+                    cm_M1U$Conf_Accuracy$overall[1],
+                    cm_M2U$Conf_Accuracy$overall[1],
+                    cm_M3U$Conf_Accuracy$overall[1],
+                    cm_P3L$Conf_Accuracy$overall[1],
+                    cm_P4L$Conf_Accuracy$overall[1],
+                    cm_P3U$Conf_Accuracy$overall[1],
+                    cm_P4U$Conf_Accuracy$overall[1])
+
+accuracy_tooth <- c("Lower M1", "Lower_M2", "Lower_M3", "Upper M1", "Upper M2", "Upper M3", "Lower P3", "Lower P4", "Upper P3", "Upper P4")
+
+df_acc <- data.frame("Tooth" = accuracy_tooth, "Accuracy" = accuracy_model)
+
+library(kableExtra)
+kable(df_acc, digits = 2) %>%
+    kable_classic(full_width = F, 
+                  html_font = "Cambria", 
+                  font_size = 10)
+```
+
+
+```{r echo=FALSE, fig.width=15, fig.height=35, message=FALSE, warning=FALSE}
+pdf("Figures/conf_matrix_species.pdf", width = 15, height = 35)
+grid.arrange(cm_P3L$Plot_Conf_Matrix,
+             cm_P3U$Plot_Conf_Matrix,
+             cm_P4L$Plot_Conf_Matrix,
+             cm_P4U$Plot_Conf_Matrix,
+             cm_M1L$Plot_Conf_Matrix,
+             cm_M1U$Plot_Conf_Matrix,
+             cm_M2L$Plot_Conf_Matrix,
+             cm_M2U$Plot_Conf_Matrix,
+             cm_M3L$Plot_Conf_Matrix,
+             cm_M3U$Plot_Conf_Matrix,
+             ncol = 2)
+dev.off()
+```
+
+### Prediction of species attribution
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(dplyr)
+library(kableExtra)
+library(purrr)
+
+# https://stackoverflow.com/questions/74522672/kable-highlighting-the-largest-value-in-each-row-r-knitr/74523211?noredirect=1#comment131567157_74523211
+
+kable_omo <- function(data){
+  x <- data$Prediction
+  max_values <- x |> 
+    mutate(across(where(is.numeric), round, 2)) |> 
+    dplyr::select(-Tooth_ID, -MD, -BL, -Prediction, -Stratigraphy, -LD1, -LD2) |>
+    pmap(pmax, na.rm = TRUE) |> as.numeric() |> na.omit()
+  
+  x |> 
+    mutate(across(where(is.numeric), round, 2)) |> 
+    mutate(across(where(is.numeric), ~if_else(row_number() %in% which(.x %in% max_values),
+                                   cell_spec(.x, format =  "html",
+                                             color = "white", bold = TRUE, background = "lightblue"), as.character(.x)))) |> 
+    mutate(across(everything(), ~ ifelse(.x == "NaN", "", .))) |>
+    kable(escape = FALSE, digits = 2, caption = deparse(substitute(data))) |> 
+    kable_classic(full_width = T, 
+                  html_font = "Cambria", 
+                  font_size = 10) %>%
+    column_spec(ncol(x)-2, bold = T, italic = T, color = "red") %>%
+    column_spec(ncol(x)-3, italic = T) %>%
+    column_spec(ncol(x)-4, italic = T) %>%
+    column_spec(ncol(x)-5, bold = T, color = "blue") %>%
+    column_spec(ncol(x)-6, bold = T, color = "blue")
+}
+
+#lapply(lda_omo_teeth, kable_omo)
+
+kable_omo(lda_omo_M1lower)
+kable_omo(lda_omo_M2lower)
+kable_omo(lda_omo_M3lower)
+kable_omo(lda_omo_M1upper)
+kable_omo(lda_omo_M2upper)
+kable_omo(lda_omo_M3upper)
+kable_omo(lda_omo_P3lower)
+kable_omo(lda_omo_P4lower)
+kable_omo(lda_omo_P3upper)
+kable_omo(lda_omo_P4upper)
+```
+
+# Analysis taking into account genera
+
+```{r lda ge fun, echo=FALSE, message=FALSE, warning=FALSE}
+# We create the function to run the linear discrimant analysis.
+library(scales)
+library(dplyr)
+lda_omo <- function(data,
+                    tooth_type = c("m1", "m2", "m3", "M1", "M2",
+                                   "M3", "P3", "P4", "p3", "p4"), 
+                    position = c("U", "L")) {
+  
+  # LDA - http://www.sthda.com/english/articles/36-classification-methods-essentials/146-discriminant-analysis-essentials-in-r/
+  model <- lda(Genera ~ scale(MD) + scale(BL) + scale(Size) + scale(Shape), data = data) 
+    tooth <- omo_numeric_mdbl
+    # Eliminamos la columna "element 2"
+    tooth <- within(tooth, rm("element 2"))
+    tooth <- tooth[tooth$Tooth == tooth_type & tooth$Position == position, ]
+    # Hacemos que se queden solo las líneas que tienen datos en columnas 31 y 32, que son Tooth y Position
+    tooth <- tooth[complete.cases(tooth[, 31:32]), ]
+  
+  # PREDICTION
+  predictions <- model %>%
+    predict(tooth)
+  pred <- as.data.frame(predictions$posterior)*100
+    pred$Tooth_ID <- tooth$Inventaire
+    pred$Stratigraphy <- tooth$`Intervalle stratigraphique...6`
+    pred$MD <- tooth$MD
+    pred$BL <- tooth$BL
+    pred$Prediction <- as.character(predictions$class)
+  xpred <- as.data.frame(predictions$x) # table with LD1 and LD2 values of Omo
+    pred$LD1 <- xpred$LD1
+    pred$LD2 <- xpred$LD2
+
+    # Aquí enlazamos colores con grupos concretos
+  # https://stackoverflow.com/questions/17180115/manually-setting-group-colors-for-ggplot2
+  # https://www.datanovia.com/en/blog/top-r-color-palettes-to-know-for-great-data-visualization/
+    # RColorBrewuer - BLUES AUSTRA / 
+    # brewer.pal(n = 9, name = "Blues") AUSTRALOPITHECUS
+    # brewer.pal(n = 9, name = "Oranges") PARANTHROPUS
+    # brewer.pal(n = 9, name = "Greens") HOMO
+    
+  group.colors <- c(`Australopithecus` = "#08306B", 
+                    `Homo`             = "#006D2C",
+                    `Paranthropus`     = "#A63603",
+                    `Ardipithecus`     = "red")
+  
+  group.shapes <- c(`Australopithecus` = 15, 
+                    `Homo`             = 17,
+                    `Paranthropus`     = 16,
+                    `Ardipithecus`     = 2)
+  
+  # PLOT
+  lda.data <- cbind(data, predict(model)$x)
+  hull_data <- # https://datavizpyr.com/how-to-highlight-groups-with-convex-hull-in-ggplot2/
+    lda.data %>%
+    # drop_na() %>%
+    group_by(Genera) %>%
+    slice(chull(LD1, LD2))
+  ggplot_omo <- ggplot(lda.data, aes(LD1, LD2)) +
+    geom_hline(yintercept = 0, lty = 2, lwd = 0.5, alpha = 0.15) + 
+    geom_vline(xintercept = 0, lty = 2, lwd = 0.5, alpha = 0.15) + # https://stackoverflow.com/questions/14806627/getting-the-name-of-a-data-frame
+    # ggtitle(deparse(substitute(data))) + 
+    geom_polygon(data = hull_data, aes(fill = Genera, colour = Genera), 
+                 alpha = 0.3, show.legend = FALSE, linetype = "blank") +
+    geom_point(aes(fill = Genera, colour = Genera, shape = Genera), size = 2, alpha = 0.4) +
+    scale_y_continuous(breaks=seq(-40,40,1)) +
+    scale_x_continuous(breaks=seq(-40,40,1)) +
+    geom_point(data=pred, aes(x=LD1, y=LD2), 
+               fill = "black", colour = "black", shape = 20, size = 2) +
+    geom_text_repel(data=pred,
+      aes(x=LD1, y=LD2, label = Tooth_ID), fill = "black", colour = "black",
+      size = 2) +
+    scale_fill_manual(values=group.colors) + 
+    scale_color_manual(values=group.colors) +
+    scale_shape_manual(values = group.shapes) +
+    theme_minimal() +
+    theme(legend.text = element_text(face = "italic", size = 6),
+          legend.position="bottom",
+          legend.key.size = unit(0.4, "cm"),
+          legend.title=element_blank(),
+          panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+          axis.line = element_line(colour = "gray90")) +
+    guides(fill=guide_legend(nrow=3, byrow=TRUE))
+  
+  # OUTPUT LIST
+  list(LDA = model, 
+       Prediction = pred, 
+       GGPLOT = ggplot_omo)
+}
+```
+
+```{r lda ge run, echo=FALSE, message=FALSE, warning=FALSE}
+# We run the function and store the results.
+# data = M1lower (from the Skinner paper and database mdbl)
+lda_omo_M1lower_ge <- lda_omo(M1lower, "m1", "L")
+lda_omo_M2lower_ge <- lda_omo(M2lower, "m2", "L")
+lda_omo_M3lower_ge <- lda_omo(M3lower, "m3", "L")
+lda_omo_M1upper_ge <- lda_omo(M1upper, "M1", "U")
+lda_omo_M2upper_ge <- lda_omo(M2upper, "M2", "U")
+lda_omo_M3upper_ge <- lda_omo(M3upper, "M3", "U")
+lda_omo_P3lower_ge <- lda_omo(P3lower, "p3", "L")
+lda_omo_P4lower_ge <- lda_omo(P4lower, "p4", "L")
+lda_omo_P3upper_ge <- lda_omo(P3upper, "P3", "U")
+lda_omo_P4upper_ge <- lda_omo(P4upper, "P4", "U")
+
+lda_omo_teeth_ge <- list(P3_lower = lda_omo_P3lower_ge, P3_upper = lda_omo_P3upper_ge,
+                      P4_lower = lda_omo_P4lower_ge, P4_upper = lda_omo_P4upper_ge,
+                      M1_lower = lda_omo_M1lower_ge, M1_upper = lda_omo_M1upper_ge,
+                      M2_lower = lda_omo_M2lower_ge, M2_upper = lda_omo_M2upper_ge,
+                      M3_lower = lda_omo_M3lower_ge, M3_upper = lda_omo_M3upper_ge)
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+#| layout-ncol: 2
+
+lda_omo_coef <- function(data) {
+  data$LDA$scaling
+}
+
+kable_coef <- lapply(lda_omo_teeth_ge, lda_omo_coef)
+
+kable(list(kable_coef$P3_upper, kable_coef$P4_upper), 
+      caption = "Upper P3 and P4", digits = 2) %>%
+    kable_classic(full_width = F, 
+                  html_font = "Cambria", 
+                  font_size = 10)
+kable(list(kable_coef$P3_lower, kable_coef$P4_lower), 
+      caption = "Lower P3 and P4", digits = 2) %>%
+    kable_classic(full_width = F, 
+                  html_font = "Cambria", 
+                  font_size = 10)
+kable(list(kable_coef$M1_upper, kable_coef$M2_upper, kable_coef$M3_upper), 
+      caption = "Upper M1, M2 and M3", digits = 2) %>%
+    kable_classic(full_width = F, 
+                  html_font = "Cambria", 
+                  font_size = 10)
+kable(list(kable_coef$M1_lower, kable_coef$M2_lower, kable_coef$M3_lower), 
+      caption = "Lower M1, M2 and M3", digits = 2) %>%
+    kable_classic(full_width = F, 
+                  html_font = "Cambria", 
+                  font_size = 10)
+```
+
+> \small
+`r table_number(name = "lda_coef_ge", caption = "Linear discriminant coefficients for each tooth type and function.")`
+
+### Proportion of variance
+
+Proportion of variance explained by the discriminant functions can be seen in `r table_number("prop_ge", display="cite")`.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+lda_omo_summary <- function(data) {
+  # https://stackoverflow.com/questions/23163157/extract-lda-linear-discriminant-analysis-data-in-r
+  Prop_Trace <- prop.table(data$LDA$svd^2)
+  Prop_Trace <- Prop_Trace[1:2]
+  list(`Proportion of Trace` = Prop_Trace)
+}
+
+la_ge <- lapply(lda_omo_teeth_ge, lda_omo_summary)
+pr_tr_ge <- data.frame(matrix(unlist(la_ge), nrow=length(la_ge), byrow=TRUE), stringsAsFactors=FALSE)*100
+pr_tr_ge$Accum. <- pr_tr_ge$X1 + pr_tr_ge$X2
+pr_tr_ge$Tooth_type <- names(la_ge)
+colnames(pr_tr_ge) <- c("LD1", "LD2", "LD1+LD2", "Tooth type")
+
+kable(pr_tr_ge, digits = 2) %>%
+  kable_classic(full_width = F, 
+                  html_font = "Cambria", 
+                  font_size = 10)
+```
+
+> \small
+`r table_number(name = "prop_ge", caption = "Proportion of variance explained by the discriminant functions when we consider species.")`
+
+### Graphical representations
+
+```{r fig.height=20, fig.width=15, message=FALSE, warning=FALSE, echo=FALSE}
+omo_ggplot <- function(data) {
+  data$GGPLOT
+}
+
+omogg <- lapply(lda_omo_teeth_ge, omo_ggplot)
+
+library(gridExtra)
+do.call("grid.arrange", c(omogg, ncol = 2))
+```
+
+### Accuracy of the predictions
+
+```{r fig.height=10, fig.width=10, message=FALSE, warning=FALSE, include=FALSE}
+# https://pages.cms.hu-berlin.de/EOL/gcg_quantitative-methods/Lab11_LDA_Model-assessment.html#Linear_Discriminant_Analysis
+# https://cran.r-project.org/web/packages/cvms/vignettes/Creating_a_confusion_matrix.html
+
+library(MASS)
+library(gmodels)
+library(cvms)
+library(tibble)
+library(ggplot2)
+library(caret)
+
+confusion_matrix_omo_gen <- function(data){
+  lda_model <- lda(Genera ~ scale(MD) + scale(BL) + scale(Size) + scale(Shape), data = data) 
+  lda_prediction <- predict(lda_model)
+  conf <- table(predicted=lda_prediction$class, observed=data$Genera)
+  cfm <- as_tibble(conf)
+  conf2 <- CrossTable(lda_prediction$class, data$Genera)
+  plot_cm <- plot_confusion_matrix(cfm, 
+                      target_col = "observed", 
+                      prediction_col = "predicted",
+                      counts_col = "n",
+                      add_normalized = F) +
+    ggtitle(deparse(substitute(data))) +
+    theme(axis.text.x = element_text(angle = 15),
+          axis.text.y = element_text(angle = 15))
+  
+ # how to get Accuracy of the predictions
+  # https://www.digitalocean.com/community/tutorials/confusion-matrix-in-r
+  acc <- confusionMatrix(data=factor(lda_prediction$class), reference = factor(data$Genera))
+  
+  # OUTPUT LIST
+  list(Conf_Accuracy = acc,
+       Confusion_Matrix_Simple = conf, 
+       Confusion_Matrix_Complete = conf2, 
+       Plot_Conf_Matrix = plot_cm)
+}
+
+lda_kdd_teeth_gen <- list(M1_lower = M1lower, M2_lower = M2lower, M3_lower = M3lower,
+                      M1_upper = M1upper, M2_upper = M2upper, M3_upper = M3upper,
+                      P3_lower = P3lower, P4_lower = P4lower,
+                      P3_upper = P3upper, P4_upper = P4upper)
+
+cm_gen_M1L <- confusion_matrix_omo_gen(M1lower)
+cm_gen_M2L <- confusion_matrix_omo_gen(M2lower)
+cm_gen_M3L <- confusion_matrix_omo_gen(M3lower)
+cm_gen_M1U <- confusion_matrix_omo_gen(M1upper)
+cm_gen_M2U <- confusion_matrix_omo_gen(M2upper)
+cm_gen_M3U <- confusion_matrix_omo_gen(M3upper)
+cm_gen_P3L <- confusion_matrix_omo_gen(P3lower)
+cm_gen_P4L <- confusion_matrix_omo_gen(P4lower)
+cm_gen_P3U <- confusion_matrix_omo_gen(P3upper)
+cm_gen_P4U <- confusion_matrix_omo_gen(P4upper)
+```
+
+```{r echo=FALSE}
+accuracy_model_gen <- c(cm_gen_M1L$Conf_Accuracy$overall[1],
+                    cm_gen_M2L$Conf_Accuracy$overall[1],
+                    cm_gen_M3L$Conf_Accuracy$overall[1],
+                    cm_gen_M1U$Conf_Accuracy$overall[1],
+                    cm_gen_M2U$Conf_Accuracy$overall[1],
+                    cm_gen_M3U$Conf_Accuracy$overall[1],
+                    cm_gen_P3L$Conf_Accuracy$overall[1],
+                    cm_gen_P4L$Conf_Accuracy$overall[1],
+                    cm_gen_P3U$Conf_Accuracy$overall[1],
+                    cm_gen_P4U$Conf_Accuracy$overall[1])
+
+accuracy_tooth_gen <- c("Lower M1", "Lower_M2", "Lower_M3", "Upper M1", "Upper M2", "Upper M3", "Lower P3", "Lower P4", "Upper P3", "Upper P4")
+
+df_acc_gen <- data.frame("Tooth" = accuracy_tooth_gen, "Accuracy" = accuracy_model_gen)
+
+library(kableExtra)
+kable(df_acc_gen, digits = 2) %>%
+    kable_classic(full_width = F, 
+                  html_font = "Cambria", 
+                  font_size = 10)
+```
+
+```{r echo=FALSE, fig.width=15, fig.height=35, message=FALSE, warning=FALSE}
+pdf("Figures/conf_matrix_genera.pdf", width = 15, height = 35)
+grid.arrange(cm_gen_P3L$Plot_Conf_Matrix,
+             cm_gen_P3U$Plot_Conf_Matrix,
+             cm_gen_P4L$Plot_Conf_Matrix,
+             cm_gen_P4U$Plot_Conf_Matrix,
+             cm_gen_M1L$Plot_Conf_Matrix,
+             cm_gen_M1U$Plot_Conf_Matrix,
+             cm_gen_M2L$Plot_Conf_Matrix,
+             cm_gen_M2U$Plot_Conf_Matrix,
+             cm_gen_M3L$Plot_Conf_Matrix,
+             cm_gen_M3U$Plot_Conf_Matrix,
+             ncol = 2)
+dev.off()
+```
+
+
+### Prediction of genera attribution
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(dplyr)
+library(kableExtra)
+library(purrr)
+
+# https://stackoverflow.com/questions/74522672/kable-highlighting-the-largest-value-in-each-row-r-knitr/74523211?noredirect=1#comment131567157_74523211
+
+kable_omo_ge <- function(data){
+  x <- data$Prediction
+  max_values <- x |> 
+    mutate(across(where(is.numeric), round, 2)) |> 
+    dplyr::select(-Tooth_ID, -MD, -BL, -Prediction, -Stratigraphy, -LD1, -LD2) |>
+    pmap(pmax, na.rm = TRUE) |> as.numeric() |> na.omit()
+  
+  x |> 
+    mutate(across(where(is.numeric), round, 2)) |> 
+    mutate(across(where(is.numeric), ~if_else(row_number() %in% which(.x %in% max_values),
+                                   cell_spec(.x, format =  "html",
+                                             color = "white", bold = TRUE, background = "lightblue"), as.character(.x)))) |> 
+    mutate(across(everything(), ~ ifelse(.x == "NaN", "", .))) |>
+    kable(escape = FALSE, digits = 2, caption = deparse(substitute(data))) |> 
+    kable_classic(full_width = T, 
+                  html_font = "Cambria", 
+                  font_size = 10) %>%
+    column_spec(ncol(x)-2, bold = T, italic = T, color = "red") %>%
+    column_spec(ncol(x)-3, italic = T) %>%
+    column_spec(ncol(x)-4, italic = T) %>%
+    column_spec(ncol(x)-5, bold = T, color = "blue") %>%
+    column_spec(ncol(x)-6, bold = T, color = "blue")
+}
+
+#lapply(lda_omo_teeth, kable_omo_ge)
+
+kable_omo_ge(lda_omo_M1lower_ge)
+kable_omo_ge(lda_omo_M2lower_ge)
+kable_omo_ge(lda_omo_M3lower_ge)
+kable_omo_ge(lda_omo_M1upper_ge)
+kable_omo_ge(lda_omo_M2upper_ge)
+kable_omo_ge(lda_omo_M3upper_ge)
+kable_omo_ge(lda_omo_P3lower_ge)
+kable_omo_ge(lda_omo_P4lower_ge)
+kable_omo_ge(lda_omo_P3upper_ge)
+kable_omo_ge(lda_omo_P4upper_ge)
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+options(knitr.kable.NA = '')
+library(MASS)
+#library(tidyverse)
+library(knitr)
+library(kableExtra)
+library(ggplot2)
+library(ggrepel)
+library(tibble)
+library(dplyr)
+```
+
+# Boxplots and scatterplots MD/BL comparative
+
+```{r plots comparative, include=FALSE}
+library(ggplot2)
+ggplot_measurements_gen <- function(tooth, file_name_pdf) {
+  library(dplyr)
+  library(tidyr)
+  tooth_type <- tooth %>%
+    dplyr::select(Species, Genera, MD, BL, Size, Shape) %>%
+    gather(Measurement, Value, MD:Shape)
+  
+  tooth_sum <- tooth %>%
+    group_by(Genera) %>%
+    summarise_at(vars(c(Size, Shape, BL, MD)),
+                 list(min = min,
+                      max = max))
+  
+  print(tooth_sum)
+  
+  group.colors <- c(`Australopithecus` = "#08306B", 
+                    `Homo`             = "#006D2C",
+                    `Paranthropus`     = "#A63603")
+  
+ggplot2::ggplot(tooth_type, aes(x=Genera, y = Value)) +
+    geom_boxplot(aes(color = Genera, fill = Genera), alpha = 0.25) +
+    geom_point(aes(color = Genera), alpha = .5) +
+    scale_fill_manual(values=group.colors) + 
+    scale_color_manual(values=group.colors) +
+    theme(legend.position = "none", axis.text.x = element_text(face = "italic")) +
+    facet_wrap(~Measurement, scales="free_y") +
+    # scale_x_discrete(guide = guide_axis(angle = 45)) +
+    xlab(NULL) + ylab(NULL)
+
+ggsave(file_name_pdf)
+}
+
+ggplot_measurements_gen(M1lower, "M1lower_gen_leslea.pdf")
+ggplot_measurements_gen(M2lower, "M2lower_gen_leslea.pdf")
+ggplot_measurements_gen(M3lower, "M3lower_gen_leslea.pdf")
+ggplot_measurements_gen(M1upper, "M1upper_gen_leslea.pdf")
+ggplot_measurements_gen(M2upper, "M2upper_gen_leslea.pdf")
+ggplot_measurements_gen(M3upper, "M3upper_gen_leslea.pdf")
+ggplot_measurements_gen(P3upper, "P3upper_gen_leslea.pdf")
+ggplot_measurements_gen(P4upper, "P4upper_gen_leslea.pdf")
+ggplot_measurements_gen(P3lower, "P3lower_gen_leslea.pdf")
+ggplot_measurements_gen(P4lower, "P4lower_gen_leslea.pdf")
+
+
+ggplot_measurements_spe <- function(tooth, file_name_pdf) {
+  library(dplyr)
+  library(tidyr)
+  tooth_type <- tooth %>%
+    dplyr::select(Species, Genera, MD, BL, Size, Shape) %>%
+    gather(Measurement, Value, MD:Shape)
+  
+  tooth_sum <- tooth %>%
+    group_by(Genera) %>%
+    summarise_at(vars(c(Size, Shape, BL, MD)),
+                 list(min = min,
+                      max = max))
+  
+  print(tooth_sum)
+  
+  group.colors <- c(`Australopithecus afarensis` = "#08306B",
+                    `Australopithecus deyiremeda` = "#08306B",
+                    `Australopithecus garhi` = "#08306B",
+                    `Australopithecus anamensis` = "#08306B",
+                    `Homo erectus`                = "#006D2C",
+                    `Homo habilis`                = "#006D2C",
+                    `Paranthropus aethiopicus`       = "#A63603",
+                    `Paranthropus boisei`       = "#A63603")
+  
+ggplot2::ggplot(tooth_type, aes(x=Species, y = Value)) +
+    geom_boxplot(aes(color = Species, fill = Species), alpha = 0.25) +
+    geom_point(aes(color = Species), alpha = .5) +
+    scale_fill_manual(values=group.colors) + 
+    scale_color_manual(values=group.colors) +
+    theme(legend.position = "none", axis.text.x = element_text(face = "italic")) +
+    facet_wrap(~Measurement, scales="free_y") +
+    scale_x_discrete(guide = guide_axis(angle = 70)) +
+    xlab(NULL) + ylab(NULL)
+
+ggsave(file_name_pdf)
+}
+
+ggplot_measurements_spe(M1lower, "M1lower_spe_leslea.pdf")
+ggplot_measurements_spe(M2lower, "M2lower_spe_leslea.pdf")
+ggplot_measurements_spe(M3lower, "M3lower_spe_leslea.pdf")
+ggplot_measurements_spe(M1upper, "M1upper_spe_leslea.pdf")
+ggplot_measurements_spe(M2upper, "M2upper_spe_leslea.pdf")
+ggplot_measurements_spe(M3upper, "M3upper_spe_leslea.pdf")
+ggplot_measurements_spe(P3upper, "P3upper_spe_leslea.pdf")
+ggplot_measurements_spe(P4upper, "P4upper_spe_leslea.pdf")
+ggplot_measurements_spe(P3lower, "P3lower_spe_leslea.pdf")
+ggplot_measurements_spe(P4lower, "P4lower_spe_leslea.pdf")
+
+```
+
+```{r echo=FALSE, fig.height=5, fig.width=5}
+# Creamos función
+boxplot_diameter <- function(data, # datos de KDD 
+                             title, # título de la figura
+                             tooth_type_omo, # tipo de diente de Omo (minúsculas mand, mayúsculuas max)
+                             tooth_position_omo, # posición del diente de Omo
+                             stratigraphy # estratigrafía interesada
+                             ) {
+  # Usamos gather para crear una columna con MD y BL de KDD
+  library(tidyr)
+  library(dplyr)
+  library(ggpubr)
+  test <- data %>%
+    dplyr::select(Species,MD, BL) %>%
+    gather(key = Diameter,
+           value = Measurement, 
+           -1)
+  # Filtramos Omo
+  omo <- omo_numeric_mdbl %>%
+    # Seleccionamos columnas
+    dplyr::select(MD, BL, Stratigraphy, Tooth, Position) %>%
+    # https://stackoverflow.com/questions/75542736/str-replace-in-same-column-for-multiple-replacements-dplyr-stringr/75542819#75543030
+    mutate(elements = str_extract_all(Stratigraphy, "[A-Z]")) |>
+    unnest_wider(elements, names_sep = "_") |>
+    mutate(newStratigraphy = if_else(elements_1 == elements_2 | is.na(elements_2),
+                                     elements_1,
+                                     paste0(elements_1, "-", elements_2))) %>%
+    # Creamos columna con la especie Omo
+    mutate(Species = "Omo") %>%
+    drop_na(MD, BL) %>%
+    filter(Tooth == tooth_type_omo & Position == tooth_position_omo) %>%
+    dplyr::select(MD, BL, Stratigraphy, Species, newStratigraphy) %>%
+    filter(newStratigraphy == stratigraphy) %>%
+    dplyr::select(Species, MD, BL) %>%
+    gather(key = Diameter, 
+           value = Measurement,
+           -1)
+  
+    omo2 <- omo_numeric_mdbl %>%
+      # Seleccionamos columnas
+      dplyr::select(MD, BL, Stratigraphy, Tooth, Position) %>%
+      # https://stackoverflow.com/questions/75542736/str-replace-in-same-column-for-multiple-replacements-dplyr-stringr/75542819#75543030
+      mutate(elements = str_extract_all(Stratigraphy, "[A-Z]")) |>
+      unnest_wider(elements, names_sep = "_") |>
+      mutate(newStratigraphy = if_else(elements_1 == elements_2 | is.na(elements_2),
+                                       elements_1,
+                                       paste0(elements_1, "-", elements_2))) %>%
+      # Creamos columna con la especie Omo
+      mutate(Species = "Omo") %>%
+      drop_na(MD, BL) %>%
+      filter(Tooth == tooth_type_omo & Position == tooth_position_omo) %>%
+      dplyr::select(MD, BL, Stratigraphy, Species, newStratigraphy) %>%
+      filter(newStratigraphy == stratigraphy) %>%
+      dplyr::select(Species, MD, BL)
+  # Combinamos los dos datasets
+  test2 <- rbind(omo,test)
+  # Hacemos ggplot boxplot
+  boxplot1 <- ggplot(test2, aes(x=Species, y = Measurement, fill=Diameter)) +
+    geom_boxplot(outlier.colour="red", 
+                 outlier.shape=8,
+                 outlier.size=1) +
+    theme(axis.text.x = element_text(angle = 45, hjust=1, size = 9))+
+    #geom_hline(yintercept = MDf, lty = 2, col = "blue") + 
+    #geom_hline(yintercept = BLf, lty = 2, col = "red") +
+    ggtitle(title)
+  # Combinamos el data original para mezclarlo con Omo
+  data2 <- data %>%
+    dplyr::select(Species, MD, BL)
+  
+  data3 <- rbind(data2, omo2)
+  # Hacemos ggplot scatterplot
+  hull_data <- 
+    data3 %>%
+    group_by(Species) %>% 
+    slice(chull(MD, BL))
+
+  scatterplot1 <- ggplot(data3, aes(x=MD, y=BL, color=Species)) + 
+    geom_point() +
+    # geom_point(aes(x = MDf, y = BLf), colour="black", shape = 16, cex = 3) +
+    geom_polygon(data = hull_data,
+                 aes(fill = Species,
+                     colour = Species),
+                 alpha = 0.3) +
+    #coord_fixed() +
+    theme(legend.position="bottom")
+  library(ggExtra)
+  scatterplot2 <- ggMarginal(scatterplot1, 
+                             groupFill = TRUE, 
+                             groupColour = TRUE,
+                             type = "boxplot")
+    
+  # Inventaire
+  omo3 <- omo_numeric_mdbl %>%
+      # Seleccionamos columnas
+      dplyr::select(Inventaire, MD, BL, Stratigraphy, Tooth, Position) %>%
+      # https://stackoverflow.com/questions/75542736/str-replace-in-same-column-for-multiple-replacements-dplyr-stringr/75542819#75543030
+      mutate(elements = str_extract_all(Stratigraphy, "[A-Z]")) |>
+      unnest_wider(elements, names_sep = "_") |>
+      mutate(newStratigraphy = if_else(elements_1 == elements_2 | is.na(elements_2),
+                                       elements_1,
+                                       paste0(elements_1, "-", elements_2))) %>%
+      drop_na(MD, BL) %>%
+      filter(Tooth == tooth_type_omo & Position == tooth_position_omo) %>%
+      filter(newStratigraphy == stratigraphy) 
+  return(list(table = omo3,
+              gg = ggarrange(boxplot1, scatterplot2, ncol = 2)))
+  
+}
+```
+
+```{r fig.height=6, fig.width=15}
+library(stringr)
+boxplot_diameter(data = M3upper, # datos de KDD 
+                 tooth_type_omo = "M3", # tipo de diente de Omo (minúsculas mand, mayúsculuas max)
+                 tooth_position_omo = "U", # posición del diente de Omo: L/U
+                 stratigraphy = "B", # estratigrafía interesada
+                 title = "Upper M3 - Member C") # título de la figura)
+
+
+# test <- diameter_mdbl_species_LM2 %>%
+#   dplyr::select(Species, MD, BL)
+```
+
+# Supplementary Information
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+kable(P3upper, caption = "Upper P3", digits = 2) %>%
+  kable_classic(full_width = T, 
+                  html_font = "Cambria", 
+                  font_size = 10) %>%
+  column_spec(1, italic = T)
+kable(P4upper, caption = "Upper P4", digits = 2) %>%
+  kable_classic(full_width = T, 
+                  html_font = "Cambria", 
+                  font_size = 10) %>%
+  column_spec(1, italic = T)
+kable(M1upper, caption = "Upper M1", digits = 2) %>%
+  kable_classic(full_width = T, 
+                  html_font = "Cambria", 
+                  font_size = 10) %>%
+  column_spec(1, italic = T)
+kable(M2upper, caption = "Upper M2", digits = 2) %>%
+  kable_classic(full_width = T, 
+                  html_font = "Cambria", 
+                  font_size = 10) %>%
+  column_spec(1, italic = T)
+kable(M3upper, caption = "Upper M3", digits = 2) %>%
+  kable_classic(full_width = T, 
+                  html_font = "Cambria", 
+                  font_size = 10) %>%
+  column_spec(1, italic = T)
+kable(P3lower, caption = "Lower P3", digits = 2) %>%
+  kable_classic(full_width = T, 
+                  html_font = "Cambria", 
+                  font_size = 10) %>%
+  column_spec(1, italic = T)
+kable(P4lower, caption = "Lower P4", digits = 2) %>%
+  kable_classic(full_width = T, 
+                  html_font = "Cambria", 
+                  font_size = 10) %>%
+  column_spec(1, italic = T)
+kable(M1lower, caption = "Lower M1", digits = 2) %>%
+  kable_classic(full_width = T, 
+                  html_font = "Cambria", 
+                  font_size = 10) %>%
+  column_spec(1, italic = T)
+kable(M2lower, caption = "Lower M2", digits = 2) %>%
+  kable_classic(full_width = T, 
+                  html_font = "Cambria", 
+                  font_size = 10) %>%
+  column_spec(1, italic = T)
+kable(M3lower, caption = "Lower M3", digits = 2) %>%
+  kable_classic(full_width = T, 
+                  html_font = "Cambria", 
+                  font_size = 10) %>%
+  column_spec(1, italic = T)
+```
+
+> \small
+`r ed_table_number(name = "comparative_dataset", caption = "Comparative data samples with their mesiodistal (MD) and buccolingual (BL) diameters.")`
+
+# Methods
+
+## 4.2.1 Linear Discriminant (LD) Analysis
+
+Linear discriminant analysis (LDA) is a method based on linear combinations of the predictors that classifies cases into one of a fixed number of possibilities [@faraway_extending_2016]. This prediction is called classification and LDA is usually considered as a classification method. 
+
+Based on a relatively large comparative dataset of mesiodistal (MD) and buccolingual (BL) diameters of all tooth types, along with their areas (MDxBL) and proportions (MD/BL), different linear functions (LDF) were created in order to predict to which taxon (genera or species) each tooth from the Omo sample belongs to. When there was a published estimation of any diameter due to the presence of contact facets with the adjacent tooth, we employed this estimation rather the underestimated real measurement. The first two variables are measured in millimeters, the third is measured in square millimeters and the fourth one is adimensional.
+
+We used the function `lda()` from the package `MASS` [@masspackage] in R [@rproject] to run the discriminant functions. We created LDF to predict species attribution and another set of LDF to predict genera. The species output can be eight hominin species: four species of *Australopithecus* (*Au. afarensis*, *Au. anamensis*, *Au. deyiremeda* and *Au. garhi*), two of *Paranthropus* (*P. aethiopicus* and *P. boisei*) and two of *Homo* (*H. habilis* and *H. erectus*). The genera output can be three options: *Australopithecus*, *Paranthropus* and *Homo*. The four measurements (MD, BL, MDxBL, MD/BL) were scaled before running the discriminant functions with the function `scale()` of the `base` package [@rproject] in R.
+
+By employing the LDA, each Omo tooth has a probability to belong to each of the species / genera. The species / genera that has the highest probability is the one that was selected as the most likely option.
+
+The plots representing linear discriminant functions 1 and 2 in each tooth type were generated by using the packages `ggplot` [@ggplotpackage] and `ggrepel` [@ggrepelpackage] in R.
+
+Confusion matrices were used to evaluate the performance of the LDFs when predicting genera and species of the Omo teeth. For this purpose, two R packages were used: `gmodels` [@gmodelspackage] and `cvms` [@cvmspackage].
+
+# Figures for the manuscript
+
+## Figure 4
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+library(gridExtra)
+library(ggpubr)
+pdf("Figures/Figure 4_leslea_L894_1.pdf", width = 9, height = 9)
+# do.call("grid.arrange", c(omogg, ncol = 2))
+commonplot <- ggarrange(lda_omo_P3upper$GGPLOT,
+          lda_omo_P3upper_ge$GGPLOT,
+          lda_omo_P3lower$GGPLOT,
+          lda_omo_P3lower_ge$GGPLOT, 
+          ncol = 2, nrow = 2)
+annotate_figure(commonplot, 
+                top =  "Species                                                                                    Genera",
+                left = "                           Lower P3                                                                                   Upper P3")
+dev.off()
+```
+
+## Figure 5
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+library(gridExtra)
+pdf("Figures/Figure 5_leslea_L894_1.pdf", width = 9, height = 9)
+commonplot <- ggarrange(lda_omo_P4upper$GGPLOT,
+          lda_omo_P4upper_ge$GGPLOT,
+          lda_omo_P4lower$GGPLOT,
+          lda_omo_P4lower_ge$GGPLOT, 
+          ncol = 2, nrow = 2)
+annotate_figure(commonplot, 
+                top =  "Species                                                                                    Genera",
+                left = "                           Lower P4                                                                                   Upper P4")
+dev.off()
+```
+
+## Figure 6
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+library(gridExtra)
+pdf("Figures/Figure 6_leslea_L894_1.pdf", width = 9, height = 9)
+commonplot <- ggarrange(lda_omo_M1upper$GGPLOT,
+          lda_omo_M1upper_ge$GGPLOT,
+          lda_omo_M1lower$GGPLOT,
+          lda_omo_M1lower_ge$GGPLOT, 
+          ncol = 2, nrow = 2)
+annotate_figure(commonplot, 
+                top =  "Species                                                                                    Genera",
+                left = "                           Lower M1                                                                                   Upper M1")
+dev.off()
+```
+
+## Figure 7
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+library(gridExtra)
+pdf("Figures/Figure 7_leslea_L894_1.pdf", width = 9, height = 9)
+commonplot <- ggarrange(lda_omo_M2upper$GGPLOT,
+          lda_omo_M2upper_ge$GGPLOT,
+          lda_omo_M2lower$GGPLOT,
+          lda_omo_M2lower_ge$GGPLOT, 
+          ncol = 2, nrow = 2)
+annotate_figure(commonplot, 
+                top =  "Species                                                                                    Genera",
+                left = "                           Lower M2                                                                                   Upper M2")
+dev.off()
+```
+
+## Figure 8
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+library(gridExtra)
+pdf("Figures/Figure 8_leslea_L894_1.pdf", width = 9, height = 9)
+commonplot <- ggarrange(lda_omo_M3upper$GGPLOT,
+          lda_omo_M3upper_ge$GGPLOT,
+          lda_omo_M3lower$GGPLOT,
+          lda_omo_M3lower_ge$GGPLOT, 
+          ncol = 2, nrow = 2)
+annotate_figure(commonplot, 
+                top =  "Species                                                                                    Genera",
+                left = "                           Lower M3                                                                                   Upper M3")
+dev.off()
+```
+
+# Figuras comparativa Marianne
+
+## Genera 
+
+```{r fig.height=8, fig.width=10}
+group.colors <- c(`Australopithecus LP`  = "#08306B", 
+                    `Au. anamensis`  = "#08306B", 
+                    `Au. deyiremeda` = "#08306B", 
+                    `Au. garhi`      = "#08306B", 
+                    `H. erectus` = "#006D2C",
+                    `Homo EEA`  = "#006D2C",
+                    `P. boisei`         = "#A63603",
+                    `P. aethiopicus`    = "#A63603",
+                    `Ar. ramidus`        = "red",
+                    `Ar. kadabba`        = "red")
+  
+  group.shapes <- c(`Australopithecus LP`  = 0, 
+                    `Au. anamensis`  = 7, 
+                    `Au. deyiremeda` = 12, 
+                    `Au. garhi`      = 14, 
+                    `H. erectus`                = 2,
+                    `Homo EEA`  = 6,
+                    `P. boisei`         = 1,
+                    `P. aethiopicus`    = 10,
+                    `Ar. ramidus`        = 3,
+                    `Ar. kadabba`        = 4)
+  
+  group.colors.gen <- c(`Australopithecus` = "#08306B", 
+                    `Homo`             = "#006D2C",
+                    `Paranthropus`     = "#A63603",
+                    `Ardipithecus`     = "red")
+  
+  group.shapes.gen <- c(`Australopithecus` = 15, 
+                    `Homo`             = 17,
+                    `Paranthropus`     = 16,
+                    `Ardipithecus`     = 2)
+
+
+
+library(ggplot2)
+
+pdf("Figures comparative Marianne/Genera_MD.pdf", width = 8, height = 14)
+ggplot(diameter_leslea, aes(x = Genera, y = MD, fill =  Genera)) +
+  geom_boxplot(alpha = 0.5) +
+  scale_fill_manual (values = group.colors.gen) +
+  scale_shape_manual(values = group.shapes.gen) +
+  scale_color_manual(values = group.colors.gen) +
+  geom_jitter(aes(colour =  Genera), alpha = 0.5) +
+  facet_wrap(~Tooth + Position, ncol = 2) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, face = "italic"),
+        legend.position = "none") +
+  ylab("Mesiodistal diameter (mm.)")
+dev.off()
+
+pdf("Figures comparative Marianne/Genera_BL.pdf", width = 8, height = 14)
+ggplot(diameter_leslea, aes(x = Genera, y = BL, fill =  Genera)) +
+  geom_boxplot(alpha = 0.5) +
+  scale_fill_manual (values = group.colors.gen) +
+  scale_shape_manual(values = group.shapes.gen) +
+  scale_color_manual(values = group.colors.gen) +
+  geom_jitter(aes(colour =  Genera), alpha = 0.5) +
+  facet_wrap(~Tooth + Position, ncol = 2) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, face = "italic"),
+        legend.position = "none") +
+  ylab("Buccolingual diameter (mm.)")
+dev.off()
+
+pdf("Figures comparative Marianne/Genera_surface.pdf", width = 8, height = 14)
+ggplot(diameter_leslea, aes(x = Genera, y = MD*BL, fill =  Genera)) +
+  geom_boxplot(alpha = 0.5) +
+  scale_fill_manual (values = group.colors.gen) +
+  scale_shape_manual(values = group.shapes.gen) +
+  scale_color_manual(values = group.colors.gen) +
+  geom_jitter(aes(colour =  Genera), alpha = 0.5) +
+  facet_wrap(~Tooth + Position, ncol = 2) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, face = "italic"),
+        legend.position = "none") +
+  ylab("Crown surface - MDxBL (mm2)")
+dev.off()
+
+pdf("Figures comparative Marianne/Genera_index.pdf", width = 8, height = 14)
+ggplot(diameter_leslea, aes(x = Genera, y = MD/BL, fill =  Genera)) +
+  geom_boxplot(alpha = 0.5) +
+  scale_fill_manual (values = group.colors.gen) +
+  scale_shape_manual(values = group.shapes.gen) +
+  scale_color_manual(values = group.colors.gen) +
+  geom_jitter(aes(colour =  Genera), alpha = 0.5) +
+  facet_wrap(~Tooth + Position, ncol = 2) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, face = "italic"),
+        legend.position = "none") +
+  ylab("Crown index - MD/BL")
+dev.off()
+```
+
+## Species
+
+```{r fig.height=8, fig.width=10}
+
+
+library(ggplot2)
+
+pdf("Figures comparative Marianne/Species_MD.pdf", width = 8, height = 14)
+ggplot(diameter_leslea, aes(x = Species, y = MD, fill =  Species)) + 
+  geom_boxplot(alpha = 0.5) +
+  scale_fill_manual (values = group.colors) +
+  scale_shape_manual(values = group.shapes) +
+  scale_color_manual(values = group.colors) +
+  geom_jitter(aes(colour =  Species), alpha = 0.5) +
+  facet_wrap(~Tooth + Position, ncol = 2) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, face = "italic"),
+        legend.position = "none") +
+  ylab("Mesiodistal diameter (mm.)")
+dev.off()
+
+pdf("Figures comparative Marianne/Species_BL.pdf", width = 8, height = 14)
+ggplot(diameter_leslea, aes(x = Species, y = BL, fill =  Species)) + 
+  geom_boxplot(alpha = 0.5) +
+  scale_fill_manual (values = group.colors) +
+  scale_shape_manual(values = group.shapes) +
+  scale_color_manual(values = group.colors) +
+  geom_jitter(aes(colour =  Species), alpha = 0.5) +
+  facet_wrap(~Tooth + Position, ncol = 2) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, face = "italic"),
+        legend.position = "none") +
+  ylab("Buccolingual diameter (mm.)")
+dev.off()
+
+pdf("Figures comparative Marianne/Species_surface.pdf", width = 8, height = 14)
+ggplot(diameter_leslea, aes(x = Species, y = MD*BL, fill =  Species)) + 
+  geom_boxplot(alpha = 0.5) +
+  scale_fill_manual (values = group.colors) +
+  scale_shape_manual(values = group.shapes) +
+  scale_color_manual(values = group.colors) +
+  geom_jitter(aes(colour =  Species), alpha = 0.5) +
+  facet_wrap(~Tooth + Position, ncol = 2) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, face = "italic"),
+        legend.position = "none") +
+  ylab("Crown surface - MDxBL (mm2)")
+dev.off()
+
+pdf("Figures comparative Marianne/Species_index.pdf", width = 8, height = 14)
+ggplot(diameter_leslea, aes(x = Species, y = MD/BL, fill =  Species)) + 
+  geom_boxplot(alpha = 0.5) +
+  scale_fill_manual (values = group.colors) +
+  scale_shape_manual(values = group.shapes) +
+  scale_color_manual(values = group.colors) +
+  geom_jitter(aes(colour =  Species), alpha = 0.5) +
+  facet_wrap(~Tooth + Position, ncol = 2) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, face = "italic"),
+        legend.position = "none") +
+  ylab("Crown index - MD/BL")
+dev.off()
+```
+
+# Figuras 4-13 Omo final
+
+```{r}
+library(dplyr)
+gg_omo_fun <- function(data, tooth, position, ylabMD, ylabBL, ylabSH, ylabSI) {
+  ggarrange(
+  ggplot(diameter_leslea %>% filter(Tooth == tooth & Position == position), 
+       aes(x = Species, y = MD, fill =  Species)) + 
+    geom_boxplot(alpha = 0.5) +
+    scale_fill_manual (values = group.colors) +
+    scale_shape_manual(values = group.shapes) +
+    scale_color_manual(values = group.colors) +
+    geom_jitter(position=position_jitter(0.1), aes(colour = Species), alpha = 0.5) +
+    theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        legend.position = "none") +
+    ylab(ylabMD),
+  ggplot(diameter_leslea %>% filter(Tooth == tooth & Position == position), 
+       aes(x = Species, y = BL, fill =  Species)) + 
+    geom_boxplot(alpha = 0.5) +
+    scale_fill_manual (values = group.colors) +
+    scale_shape_manual(values = group.shapes) +
+    scale_color_manual(values = group.colors) +
+    geom_jitter(position=position_jitter(0.1), aes(colour = Species), alpha = 0.5) +
+    theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        legend.position = "none") +
+    ylab(ylabBL),
+  ggplot(diameter_leslea %>% filter(Tooth == tooth & Position == position), 
+       aes(x = Species, y = Size, fill =  Species)) + 
+    geom_boxplot(alpha = 0.5) +
+    scale_fill_manual (values = group.colors) +
+    scale_shape_manual(values = group.shapes) +
+    scale_color_manual(values = group.colors) +
+    geom_jitter(position=position_jitter(0.1), aes(colour = Species), alpha = 0.5) +
+    theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, face = "italic"),
+          legend.position = "none") +
+    ylab(ylabSI) +
+    xlab(NULL),
+  ggplot(diameter_leslea %>% filter(Tooth == tooth & Position == position), 
+       aes(x = Species, y = Shape, fill =  Species)) + 
+    geom_boxplot(alpha = 0.5) +
+    scale_fill_manual (values = group.colors) +
+    scale_shape_manual(values = group.shapes) +
+    scale_color_manual(values = group.colors) +
+    geom_jitter(position=position_jitter(0.1), aes(colour = Species), alpha = 0.5) +
+    theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, face = "italic"),
+          legend.position = "none") +
+    ylab(ylabSH) +
+    xlab(NULL),
+  heights = c(1.6, 2), align = "v", labels = c("A", "B", "C", "D"))
+}
+
+pdf("Figures comparative Marianne/Figure 4 - lower P3 - Mario 09072024.pdf", width = 10, height = 6)
+gg_omo_fun(data = diameter_leslea,
+           tooth = "P3", position = "L",
+           ylabMD = "Lower P3 - MD",
+           ylabBL = "Lower P3 - BL",
+           ylabSH = "Lower P3 - MD/BL",
+           ylabSI = "Lower P3 - MDxBL")
+dev.off()
+
+pdf("Figures comparative Marianne/Figure 5 - lower P4 - Mario 09072024.pdf", width = 10, height = 6)
+gg_omo_fun(data = diameter_leslea,
+           tooth = "P4", position = "L",
+           ylabMD = "Lower P4 - MD",
+           ylabBL = "Lower P4 - BL",
+           ylabSH = "Lower P4 - MD/BL",
+           ylabSI = "Lower P4 - MDxBL")
+dev.off()
+
+pdf("Figures comparative Marianne/Figure 6 - lower M1 - Mario 09072024.pdf", width = 10, height = 6)
+gg_omo_fun(data = diameter_leslea,
+           tooth = "M1", position = "L",
+           ylabMD = "Lower M1 - MD",
+           ylabBL = "Lower M1 - BL",
+           ylabSH = "Lower M1 - MD/BL",
+           ylabSI = "Lower M1 - MDxBL")
+dev.off()
+
+pdf("Figures comparative Marianne/Figure 7 - lower M2 - Mario 09072024.pdf", width = 10, height = 6)
+gg_omo_fun(data = diameter_leslea,
+           tooth = "M2", position = "L",
+           ylabMD = "Lower M2 - MD",
+           ylabBL = "Lower M2 - BL",
+           ylabSH = "Lower M2 - MD/BL",
+           ylabSI = "Lower M2 - MDxBL")
+dev.off()
+
+pdf("Figures comparative Marianne/Figure 8 - lower M3 - Mario 09072024.pdf", width = 10, height = 6)
+gg_omo_fun(data = diameter_leslea,
+           tooth = "M3", position = "L",
+           ylabMD = "Lower M3 - MD",
+           ylabBL = "Lower M3 - BL",
+           ylabSH = "Lower M3 - MD/BL",
+           ylabSI = "Lower M3 - MDxBL")
+dev.off()
+
+pdf("Figures comparative Marianne/Figure 9 - upper P3 - Mario 09072024.pdf", width = 10, height = 6)
+gg_omo_fun(data = diameter_leslea,
+           tooth = "P3", position = "U",
+           ylabMD = "Upper P3 - MD",
+           ylabBL = "Upper P3 - BL",
+           ylabSH = "Upper P3 - MD/BL",
+           ylabSI = "Upper P3 - MDxBL")
+dev.off()
+
+pdf("Figures comparative Marianne/Figure 10 - upper P4 - Mario 09072024.pdf", width = 10, height = 6)
+gg_omo_fun(data = diameter_leslea,
+           tooth = "P4", position = "U",
+           ylabMD = "Upper P4 - MD",
+           ylabBL = "Upper P4 - BL",
+           ylabSH = "Upper P4 - MD/BL",
+           ylabSI = "Upper P4 - MDxBL")
+dev.off()
+
+pdf("Figures comparative Marianne/Figure 11 - upper M1 - Mario 09072024.pdf", width = 10, height = 6)
+gg_omo_fun(data = diameter_leslea,
+           tooth = "M1", position = "U",
+           ylabMD = "Upper M1 - MD",
+           ylabBL = "Upper M1 - BL",
+           ylabSH = "Upper M1 - MD/BL",
+           ylabSI = "Upper M1 - MDxBL")
+dev.off()
+
+pdf("Figures comparative Marianne/Figure 12 - upper M2 - Mario 09072024.pdf", width = 10, height = 6)
+gg_omo_fun(data = diameter_leslea,
+           tooth = "M2", position = "U",
+           ylabMD = "Upper M2 - MD",
+           ylabBL = "Upper M2 - BL",
+           ylabSH = "Upper M2 - MD/BL",
+           ylabSI = "Upper M2 - MDxBL")
+dev.off()
+
+pdf("Figures comparative Marianne/Figure 13 - upper M3 - Mario 09072024.pdf", width = 10, height = 6)
+gg_omo_fun(data = diameter_leslea,
+           tooth = "M3", position = "U",
+           ylabMD = "Upper M3 - MD",
+           ylabBL = "Upper M3 - BL",
+           ylabSH = "Upper M3 - MD/BL",
+           ylabSI = "Upper M3 - MDxBL")
+dev.off()
+```
+# Hierarchical Cluster Analysis
+
+First, we apply one-hot encoding to all variables in the dataset.
+
+```{r include=FALSE}
+# Load data
+library(readxl)
+UI_scores <- read_excel("Hominidae_OMO_Dental features - MARINA_6-2-23 Mario.xlsx", sheet = "all teeth scored", range = "A2:I9",    na = "NA")
+UP_scores <- read_excel("Hominidae_OMO_Dental features - MARINA_6-2-23 Mario.xlsx", sheet = "all teeth scored", range = "A18:O35",  na = "NA")
+LP_scores <- read_excel("Hominidae_OMO_Dental features - MARINA_6-2-23 Mario.xlsx", sheet = "all teeth scored", range = "A38:O65",  na = "NA")
+UM_score <- read_excel("Hominidae_OMO_Dental features - MARINA_6-2-23 Mario.xlsx", sheet = "all teeth scored", range = "A68:P100",  na = "NA")
+
+UM_scores <- subset(UM_score, 
+                           # Eliminamos W 8-753 el 14 marzo 2024 porque es un deciduo 
+                   `Inventaire spécimen` != "W 8-753")
+
+LM_scores <- read_excel("Hominidae_OMO_Dental features - MARINA_6-2-23 Mario.xlsx", sheet = "all teeth scored", range = "A103:Q161", na = "NA")
+
+UI_scores <- as.data.frame(UI_scores)
+UP_scores <- as.data.frame(UP_scores)
+LP_scores <- as.data.frame(LP_scores)
+UM_scores <- as.data.frame(UM_scores)
+LM_scores <- as.data.frame(LM_scores)
+
+# Renaming rows with ID of teeth
+rownames(UI_scores) <- UI_scores$`Inventaire spécimen`
+rownames(UP_scores) <- UP_scores$`Inventaire spécimen`
+rownames(LP_scores) <- LP_scores$`Inventaire spécimen`
+rownames(UM_scores) <- UM_scores$`Inventaire spécimen`
+rownames(LM_scores) <- LM_scores$`Inventaire spécimen`
+
+# Keeping only morphological variables
+UI_scores_df <- UI_scores[,-c(1:3, ncol(UI_scores), ncol(UI_scores)-1, ncol(UI_scores)-2)]
+UP_scores_df <- UP_scores[,-c(1:3, ncol(UP_scores), ncol(UP_scores)-1, ncol(UP_scores)-2)]
+LP_scores_df <- LP_scores[,-c(1:3, ncol(LP_scores), ncol(LP_scores)-1, ncol(LP_scores)-2)]
+UM_scores_df <- UM_scores[,-c(1:3, ncol(UM_scores), ncol(UM_scores)-1, ncol(UM_scores)-2)]
+LM_scores_df <- LM_scores[,-c(1:3, ncol(LM_scores), ncol(LM_scores)-1, ncol(LM_scores)-2)]
+
+# Convert to factors all columns
+UI_scores_df[sapply(UI_scores_df, is.character)] <- lapply(UI_scores_df[sapply(UI_scores_df, is.character)], as.factor)
+UP_scores_df[sapply(UP_scores_df, is.character)] <- lapply(UP_scores_df[sapply(UP_scores_df, is.character)], as.factor)
+LP_scores_df[sapply(LP_scores_df, is.character)] <- lapply(LP_scores_df[sapply(LP_scores_df, is.character)], as.factor)
+UM_scores_df[sapply(UM_scores_df, is.character)] <- lapply(UM_scores_df[sapply(UM_scores_df, is.character)], as.factor)
+LM_scores_df[sapply(LM_scores_df, is.character)] <- lapply(LM_scores_df[sapply(LM_scores_df, is.character)], as.factor)
+```
+
+In order to analyze the morphological scores of the tooth types, we used the hierarchical clustering analysis. By using this analysis, we let the fossil teeth with their specific morphological traits to be clustered based on their similarity.
+
+The morphological scores can be identified as nominal data. In this sense, we used the R package named `nomclust`, which is specific to run hierarchical clustering of objects characterized by nominal variables [@sulc_nomclust_2022]
+
+We consider the variables we are working with as nominal variables. 
+
+```{r echo=FALSE, fig.height=8, fig.width=15, message=FALSE, warning=FALSE}
+library(nomclust)
+
+nomclust_omo <- function(data, titulo){
+  # Run the nomclust function
+  hca.omo <- nomclust(na.omit(data), measure = "lin")
+  # this creates df with summary and AIC values (to know number clusters)
+  # this identifies the lowest AIC and determine which is the row it belongs to   
+  # https://stackoverflow.com/questions/20782218/how-to-find-row-number-of-a-value-in-r-code
+  df_sum <- as.data.frame(hca.omo$eval) 
+  number_clusters <- which(df_sum$AIC == min(df_sum$AIC))
+  # plotting either AIC and dendrogram
+  # par(mfrow = c(1,2))
+  nf <- layout( matrix(c(1,2), nrow=2, byrow=TRUE),
+                heights = c(1.5,2.5))
+  eval.plot(hca.omo, criteria = "AIC")
+  dend.plot(hca.omo, clusters = number_clusters, style = "dark", colorful = TRUE, clu.col = c("#DADAEB", "#9E9AC8", "#6A51A3", "#3F007D"))
+  mtext(titulo, side = 3, line = -1.5, outer = TRUE, cex = 2)
+  # Creation of dataframe with the assignation of groups based on number of clusters
+  if(number_clusters == 4){
+    cl1 <- data.frame(Tooth = row.names(na.omit(data))[hca.omo$mem$clu_4 == 1])
+    cl1$Cluster <- "Group 1"
+    cl2 <- data.frame(Tooth = row.names(na.omit(data))[hca.omo$mem$clu_4 == 2])
+    cl2$Cluster <- "Group 2"
+    cl3 <- data.frame(Tooth = row.names(na.omit(data))[hca.omo$mem$clu_4 == 3])
+    cl3$Cluster <- "Group 3"
+    cl4 <- data.frame(Tooth = row.names(na.omit(data))[hca.omo$mem$clu_4 == 4])
+    cl4$Cluster <- "Group 4"
+    cluster_df <- rbind(cl1, cl2, cl3, cl4)
+    row.names(cluster_df) <- cluster_df$Tooth
+    cluster_df <- cluster_df[2]
+  }
+  if(number_clusters == 3) {
+    cl1 <- data.frame(Tooth = row.names(na.omit(data))[hca.omo$mem$clu_3 == 1])
+    cl1$Cluster <- "Group 1"
+    cl2 <- data.frame(Tooth = row.names(na.omit(data))[hca.omo$mem$clu_3 == 2])
+    cl2$Cluster <- "Group 2"
+    cl3 <- data.frame(Tooth = row.names(na.omit(data))[hca.omo$mem$clu_3 == 3])
+    cl3$Cluster <- "Group 3"
+    cluster_df <- rbind(cl1, cl2, cl3)    
+    row.names(cluster_df) <- cluster_df$Tooth
+    cluster_df <- cluster_df[2]
+  }
+  if(number_clusters == 2) {
+    cl1 <- data.frame(Tooth = row.names(na.omit(data))[hca.omo$mem$clu_2 == 1])
+    cl1$Cluster <- "Group 1"
+    cl2 <- data.frame(Tooth = row.names(na.omit(data))[hca.omo$mem$clu_2 == 2])
+    cl2$Cluster <- "Group 2"
+    cluster_df <- rbind(cl1, cl2)    
+    row.names(cluster_df) <- cluster_df$Tooth
+    cluster_df <- cluster_df[2]
+  }
+  if(number_clusters == 5){
+    cl1 <- data.frame(Tooth = row.names(na.omit(data))[hca.omo$mem$clu_5 == 1])
+    cl1$Cluster <- "Group 1"
+    cl2 <- data.frame(Tooth = row.names(na.omit(data))[hca.omo$mem$clu_5 == 2])
+    cl2$Cluster <- "Group 2"
+    cl3 <- data.frame(Tooth = row.names(na.omit(data))[hca.omo$mem$clu_5 == 3])
+    cl3$Cluster <- "Group 3"
+    cl4 <- data.frame(Tooth = row.names(na.omit(data))[hca.omo$mem$clu_5 == 4])
+    cl4$Cluster <- "Group 4"
+    cl5 <- data.frame(Tooth = row.names(na.omit(data))[hca.omo$mem$clu_5 == 5])
+    cl5$Cluster <- "Group 5"
+    cluster_df <- rbind(cl1, cl2, cl3, cl4, cl5)
+    row.names(cluster_df) <- cluster_df$Tooth
+    cluster_df <- cluster_df[2]
+  }
+  # We create a list with the different elements
+  list(hca.omo = hca.omo,
+       number_clusters = number_clusters,
+       Cluster_Assignment = cluster_df)
+}
+
+nomclust_omo_UP <- nomclust_omo(data = UP_scores_df, titulo = "Upper premolars")
+nomclust_omo_LP <- nomclust_omo(data = LP_scores_df, titulo = "Lower premolars")
+nomclust_omo_UM <- nomclust_omo(data = UM_scores_df, titulo = "Upper molars")
+nomclust_omo_LM <- nomclust_omo(data = LM_scores_df, titulo = "Lower molars")
+```
+
+# Combination of predictions
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+omo_comb_pred <- function(genera, species, caption) {
+  # Create dataframes with the predictions of genera and species
+  ge_pred <- genera$Prediction
+  sp_pred <-species$Prediction
+  # Change name of column prediction to insert Ge and Sp
+  names(ge_pred)[names(ge_pred) == 'Prediction'] <- 'Prediction (Ge)'
+  names(sp_pred)[names(sp_pred) == 'Prediction'] <- 'Prediction (Sp)'
+  # Creation of a new variable selecting the probability
+  ge_pred$'Prob. (Ge)' <- apply(ge_pred[, c(1:(ncol(ge_pred)-7))], 1, max, na.rm=TRUE)
+  sp_pred$'Prob. (Sp)' <- apply(sp_pred[, c(1:(ncol(sp_pred)-7))], 1, max, na.rm=TRUE)
+  # Creation of dataframe combining Genera and Species
+  combinations <- cbind(ge_pred[, c("Tooth_ID", "Stratigraphy", "Prediction (Ge)", "Prob. (Ge)")],
+                        sp_pred[, c("Prediction (Sp)", "Prob. (Sp)")])
+  combinations <- combinations[, c(1,2,3,4,5,6)]
+  # Creation of a list
+  return(list(Dataframe_Combinations = combinations))
+}
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+comb_pred <- function(genera, species, caption, hca_groups, attr) {
+  omo_comb_pred  <- omo_comb_pred(genera, species, caption)
+  tooth_clusters <- omo_comb_pred$Dataframe_Combinations
+  row.names(tooth_clusters) <- tooth_clusters$Tooth_ID
+  nomclust_omo_clusters <- hca_groups$Cluster_Assignment
+  tooth_clusters$Cluster <- nomclust_omo_clusters[rownames(tooth_clusters), 'Cluster']
+  row.names(tooth_clusters) <- NULL
+  return(as.data.frame(tooth_clusters))
+}
+
+comb_predP3lower <- comb_pred(genera = lda_omo_P3lower_ge, species = lda_omo_P3lower, caption = "Lower P3", hca_groups = nomclust_omo_LP)
+  comb_predP3lower$Tooth_type <- "Lower P3"
+comb_predP4lower <- comb_pred(genera = lda_omo_P4lower_ge, species = lda_omo_P4lower, caption = "Lower P4", hca_groups = nomclust_omo_LP)
+  comb_predP4lower$Tooth_type <- "Lower P4"
+comb_predP3upper <- comb_pred(genera = lda_omo_P3upper_ge, species = lda_omo_P3upper, caption = "Upper P3", hca_groups = nomclust_omo_UP)
+  comb_predP3upper$Tooth_type <- "Upper P3"
+comb_predP4upper <- comb_pred(genera = lda_omo_P4upper_ge, species = lda_omo_P4upper, caption = "Upper P4", hca_groups = nomclust_omo_UP)
+  comb_predP4upper$Tooth_type <- "Upper P4"
+comb_predM1lower <- comb_pred(genera = lda_omo_M1lower_ge, species = lda_omo_M1lower, caption = "Lower M1", hca_groups = nomclust_omo_LM)
+  comb_predM1lower$Tooth_type <- "Lower M1"
+comb_predM2lower <- comb_pred(genera = lda_omo_M2lower_ge, species = lda_omo_M2lower, caption = "Lower M2", hca_groups = nomclust_omo_LM)
+  comb_predM2lower$Tooth_type <- "Lower M2"
+comb_predM3lower <- comb_pred(genera = lda_omo_M3lower_ge, species = lda_omo_M3lower, caption = "Lower M3", hca_groups = nomclust_omo_LM)
+  comb_predM3lower$Tooth_type <- "Lower M3"
+comb_predM1upper <- comb_pred(genera = lda_omo_M1upper_ge, species = lda_omo_M1upper, caption = "Upper M1", hca_groups = nomclust_omo_UM)
+  comb_predM1upper$Tooth_type <- "Upper M1"
+comb_predM2upper <- comb_pred(genera = lda_omo_M2upper_ge, species = lda_omo_M2upper, caption = "Upper M2", hca_groups = nomclust_omo_UM)
+  comb_predM2upper$Tooth_type <- "Upper M2"
+comb_predM3upper <- comb_pred(genera = lda_omo_M3upper_ge, species = lda_omo_M3upper, caption = "Upper M3", hca_groups = nomclust_omo_UM)
+  comb_predM3upper$Tooth_type <- "Upper M3"
+
+# Combine lower and upper premolars and molars (to include cluster analysis)
+comb_predPlower <- rbind(comb_predP3lower, comb_predP4lower)
+comb_predPlower <- comb_predPlower[order(comb_predPlower$Stratigraphy),]
+  #comb_predPlower <- comb_predPlower[complete.cases(comb_predPlower[ , c(3,7)]),]
+comb_predPupper <- rbind(comb_predP3upper, comb_predP4upper)
+comb_predPupper <- comb_predPupper[order(comb_predPupper$Stratigraphy),]
+comb_predMlower <- rbind(comb_predM1lower, comb_predM2lower, comb_predM3lower)
+comb_predMlower <- comb_predMlower[order(comb_predMlower$Stratigraphy),]
+comb_predMupper <- rbind(comb_predM1upper, comb_predM2upper, comb_predM3upper)
+comb_predMupper <- comb_predMupper[order(comb_predMupper$Stratigraphy),]
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+comb_pred_kable <- function(data, caption){
+    # Customizing the table with kable
+  kable(data, caption = caption, digits = 2, row.names = FALSE) %>%
+    kable_classic(full_width = T, 
+                  html_font = "Cambria", 
+                  font_size = 10) %>%
+    column_spec(3, italic = T) %>%
+    column_spec(5, italic = T)
+}
+library(tidyr)
+comb_pred_kable(comb_predPupper, "Upper premolars")
+comb_pred_kable(comb_predPlower, "Lower premolars")
+comb_pred_kable(comb_predMupper, "Upper molars")
+comb_pred_kable(comb_predMlower, "Lower molars")
+```
+
+```{r echo=FALSE, fig.height=6, fig.width=10, message=FALSE, warning=FALSE}
+propPlower <- table(with(comb_predPlower, mapply(grepl, `Prediction (Ge)`, `Prediction (Sp)`)))
+  propPlower_df <- as.data.frame(propPlower)
+  propPlower_df$Tooth <- "Lower premolar"
+propPupper <- table(with(comb_predPupper, mapply(grepl, `Prediction (Ge)`, `Prediction (Sp)`)))
+  propPupper_df <- as.data.frame(propPupper)
+  propPupper_df$Tooth <- "Upper premolar"
+propMlower <- table(with(comb_predMlower, mapply(grepl, `Prediction (Ge)`, `Prediction (Sp)`)))
+  propMlower_df <- as.data.frame(propMlower)
+  propMlower_df$Tooth <- "Lower molar"
+propMupper <- table(with(comb_predMupper, mapply(grepl, `Prediction (Ge)`, `Prediction (Sp)`)))
+  propMupper_df <- as.data.frame(propMupper)
+  propMupper_df$Tooth <- "Upper molar"
+
+prop <- rbind(propPlower_df, propPupper_df, propMlower_df, propMupper_df)
+
+library(ggplot2)
+spe_gen_bar <- ggplot(prop, aes(x=Tooth, y=Freq, fill=Var1)) +
+  geom_bar(stat = "identity", position=position_dodge()) +
+  scale_fill_brewer(palette="Paired") +
+  theme_minimal() +
+  # ggtitle("Genera/Species predictions have same genus") +
+  xlab("") +
+  ylab("Frequency") +
+  geom_text(aes(label = Freq),position=position_dodge(width=0.9), vjust=-0.25) +
+  theme(legend.position="bottom") +
+  theme(legend.title=element_blank())
+
+spe_gen_bar
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+## Final tables with Marina's predictions
+library(tidyverse)
+library(dplyr)
+library(kableExtra)
+library(knitr)
+
+final_table_omo <- function(table, scores) {
+  df <- table
+  rownames(df) <- table$Tooth_ID
+  a <- scores$"Inventaire spécimen"
+  Attribution_Marina <- scores$Attr
+  df2 <- cbind(a, Attribution_Marina)
+  rownames(df2) <- scores$`Inventaire spécimen`
+  df3 <- as.data.frame(df2)
+  df$Attr_Marina <- df3[rownames(df), 'Attribution_Marina']
+  return(df)
+}
+
+ftUP <- final_table_omo(table = comb_predPupper, scores = UP_scores)
+  ftUP <- ftUP[order(ftUP$Attr_Marina),]
+ftLP <- final_table_omo(table = comb_predPlower, scores = LP_scores)
+  ftLP <- ftLP[order(ftLP$Attr_Marina),]
+ftUM <- final_table_omo(table = comb_predMupper, scores = UM_scores)
+  ftUM <- ftUM[order(ftUM$Attr_Marina),]
+ftLM <- final_table_omo(table = comb_predMlower, scores = LM_scores)
+  ftLM <- ftLM[order(ftLM$Attr_Marina),]
+
+# Eliminamos filas que tienen en NA en Prediction (Ge) Y en Attr_Marina Y en Cluster
+ftUP <- ftUP[!with(ftUP,is.na(`Prediction (Ge)`) & is.na(Attr_Marina) & is.na(Cluster)),]
+ftLP <- ftLP[!with(ftLP,is.na(`Prediction (Ge)`) & is.na(Attr_Marina) & is.na(Cluster)),]
+ftUM <- ftUM[!with(ftUM,is.na(`Prediction (Ge)`) & is.na(Attr_Marina) & is.na(Cluster)),]
+ftLM <- ftLM[!with(ftLM,is.na(`Prediction (Ge)`) & is.na(Attr_Marina) & is.na(Cluster)),]
+
+# Ordenamos por columna Stratigraphy
+ftUP <- ftUP[order(ftUP$Stratigraphy, decreasing = TRUE),]
+ftLP <- ftLP[order(ftLP$Stratigraphy, decreasing = TRUE),]
+ftUM <- ftUM[order(ftUM$Stratigraphy, decreasing = TRUE),]
+ftLM <- ftLM[order(ftLM$Stratigraphy, decreasing = TRUE),]  
+
+# Convertimos -Inf en NA en las dos columnas
+ftUP$`Prob. (Ge)`[ftUP$`Prob. (Ge)` == '-Inf'] <- NA
+ftLP$`Prob. (Ge)`[ftLP$`Prob. (Ge)` == '-Inf'] <- NA
+ftUM$`Prob. (Ge)`[ftUM$`Prob. (Ge)` == '-Inf'] <- NA
+ftLM$`Prob. (Ge)`[ftLM$`Prob. (Ge)` == '-Inf'] <- NA
+ftUP$`Prob. (Sp)`[ftUP$`Prob. (Sp)` == '-Inf'] <- NA
+ftLP$`Prob. (Sp)`[ftLP$`Prob. (Sp)` == '-Inf'] <- NA
+ftUM$`Prob. (Sp)`[ftUM$`Prob. (Sp)` == '-Inf'] <- NA
+ftLM$`Prob. (Sp)`[ftLM$`Prob. (Sp)` == '-Inf'] <- NA
+
+
+kable(ftUP, caption = "Upper premolars", digits = 2, row.names = FALSE) %>%
+    kable_classic(full_width = T,
+                  html_font = "Cambria",
+                  font_size = 10) %>%
+    column_spec(3, italic = T) %>%
+    column_spec(5, italic = T) %>%
+    column_spec(9, italic = T)
+
+kable(ftLP, caption = "Lower premolars", digits = 2, row.names = FALSE) %>%
+    kable_classic(full_width = T, 
+                  html_font = "Cambria", 
+                  font_size = 10) %>%
+    column_spec(3, italic = T) %>%
+    column_spec(5, italic = T) %>%
+    column_spec(9, italic = T)
+
+kable(ftUM, caption = "Upper molars", digits = 2, row.names = FALSE) %>%
+    kable_classic(full_width = T, 
+                  html_font = "Cambria", 
+                  font_size = 10) %>%
+    column_spec(3, italic = T) %>%
+    column_spec(5, italic = T) %>%
+    column_spec(9, italic = T)
+
+kable(ftLM, caption = "Lower molars", digits = 2, row.names = FALSE) %>%
+    kable_classic(full_width = T, 
+                  html_font = "Cambria", 
+                  font_size = 10) %>%
+    column_spec(3, italic = T) %>%
+    column_spec(5, italic = T) %>%
+    column_spec(9, italic = T)
+```
+
+# Cusp area
+
+```{r area import, echo=FALSE}
+library(readxl)
+areas_allcusps_lwr <- read_excel("areas ian.xlsx", sheet = "All cusp data LOWER")
+areas_allcusps_upr <- read_excel("areas ian.xlsx", sheet = "All cusp data UPPER")
+areas_4cusps_lwr <- read_excel("areas ian.xlsx", sheet = "4 cusp data LOWER")
+areas_4cusps_upr <- read_excel("areas ian.xlsx", sheet = "4 cusp data UPPER")
+
+# Total area
+areas_allcusps_lwr$Total_area <- areas_allcusps_lwr$Protoconid + areas_allcusps_lwr$Metaconid + 
+  areas_allcusps_lwr$Hypoconid + areas_allcusps_lwr$Entoconid + areas_allcusps_lwr$Hypoconulid + 
+  areas_allcusps_lwr$`Cusp 6 (Entoconulid)` + areas_allcusps_lwr$`Cusp 7 (Metaconulid)`
+
+areas_allcusps_upr$Total_area <- areas_allcusps_upr$Paracone + areas_allcusps_upr$Protocone + 
+  areas_allcusps_upr$Metacone + areas_allcusps_upr$Hypocone + areas_allcusps_upr$Metaconule
+
+areas_4cusps_lwr$Total_area <- areas_4cusps_lwr$Protoconid + areas_4cusps_lwr$Metaconid + 
+  areas_4cusps_lwr$Hypoconid + areas_4cusps_lwr$Entoconid
+
+areas_4cusps_upr$Total_area <- areas_4cusps_upr$Paracone + areas_4cusps_upr$Protocone + 
+  areas_4cusps_upr$Metacone + areas_4cusps_upr$Hypocone
+
+# Proportions
+areas_allcusps_lwr$Ratio_Protoconid  <-  (areas_allcusps_lwr$Protoconid * 100) / areas_allcusps_lwr$Total_area
+areas_allcusps_lwr$Ratio_Metaconid   <-  (areas_allcusps_lwr$Metaconid * 100) / areas_allcusps_lwr$Total_area
+areas_allcusps_lwr$Ratio_Hypoconid   <-  (areas_allcusps_lwr$Hypoconid * 100) / areas_allcusps_lwr$Total_area
+areas_allcusps_lwr$Ratio_Entoconid   <-  (areas_allcusps_lwr$Entoconid * 100) / areas_allcusps_lwr$Total_area
+areas_allcusps_lwr$Ratio_Hypoconulid <-  (areas_allcusps_lwr$Hypoconulid * 100) / areas_allcusps_lwr$Total_area
+areas_allcusps_lwr$Ratio_Entoconulid <-  (areas_allcusps_lwr$`Cusp 6 (Entoconulid)` * 100) / areas_allcusps_lwr$Total_area
+areas_allcusps_lwr$Ratio_Metaconulid <-  (areas_allcusps_lwr$`Cusp 7 (Metaconulid)` * 100) / areas_allcusps_lwr$Total_area
+
+areas_4cusps_lwr$Ratio_Protoconid <-  (areas_4cusps_lwr$Protoconid * 100) / areas_4cusps_lwr$Total_area
+areas_4cusps_lwr$Ratio_Metaconid  <-  (areas_4cusps_lwr$Metaconid * 100) / areas_4cusps_lwr$Total_area
+areas_4cusps_lwr$Ratio_Hypoconid  <-  (areas_4cusps_lwr$Hypoconid * 100) / areas_4cusps_lwr$Total_area
+areas_4cusps_lwr$Ratio_Entoconid  <-  (areas_4cusps_lwr$Entoconid * 100) / areas_4cusps_lwr$Total_area
+
+areas_allcusps_upr$Ratio_Paracone   <-  (areas_allcusps_upr$Paracone * 100) / areas_allcusps_upr$Total_area
+areas_allcusps_upr$Ratio_Protocone  <-  (areas_allcusps_upr$Protocone * 100) / areas_allcusps_upr$Total_area
+areas_allcusps_upr$Ratio_Metacone   <-  (areas_allcusps_upr$Metacone * 100) / areas_allcusps_upr$Total_area
+areas_allcusps_upr$Ratio_Hypocone   <-  (areas_allcusps_upr$Hypocone * 100) / areas_allcusps_upr$Total_area
+areas_allcusps_upr$Ratio_Metaconule <-  (areas_allcusps_upr$Metaconule * 100) / areas_allcusps_upr$Total_area
+
+areas_4cusps_upr$Ratio_Paracone  <-  (areas_4cusps_upr$Paracone * 100) / areas_4cusps_upr$Total_area
+areas_4cusps_upr$Ratio_Protocone <-  (areas_4cusps_upr$Protocone * 100) / areas_4cusps_upr$Total_area
+areas_4cusps_upr$Ratio_Metacone  <-  (areas_4cusps_upr$Metacone * 100) / areas_4cusps_upr$Total_area
+areas_4cusps_upr$Ratio_Hypocone  <-  (areas_4cusps_upr$Hypocone * 100) / areas_4cusps_upr$Total_area
+
+# convert to dataframe
+areas_allcusps_lwr_df <- data.frame(areas_allcusps_lwr)
+areas_allcusps_upr_df <- data.frame(areas_allcusps_upr)
+areas_4cusps_lwr_df <- data.frame(areas_4cusps_lwr)
+areas_4cusps_upr_df <- data.frame(areas_4cusps_upr)
+```
+
+```{r include=FALSE}
+# ROWNAMES
+rownames(areas_allcusps_lwr_df) <- areas_allcusps_lwr_df$Lower.molars
+rownames(areas_4cusps_lwr_df)   <- areas_4cusps_lwr_df$Lower.molars
+rownames(areas_4cusps_upr_df)   <- areas_4cusps_upr_df$Upper.molars
+rownames(areas_allcusps_upr_df) <- areas_allcusps_upr_df$Upper.Molars
+
+# Remove first column
+areas_allcusps_lwr_df_final <- subset(areas_allcusps_lwr_df, select = -c(Lower.molars))
+areas_allcusps_upr_df_final <- subset(areas_allcusps_upr_df, select = -c(Upper.Molars))
+areas_4cusps_upr_df_final <- subset(areas_4cusps_upr_df, select = -c(Upper.molars))
+areas_4cusps_lwr_df_final <- subset(areas_4cusps_lwr_df, select = -c(Lower.molars))
+```
+
+## HCA plots
+
+```{r hca areas, echo=FALSE}
+# https://uc-r.github.io/hc_clustering
+# Function to run HCA
+# scaling data
+areas_allcusps_lwr_df_final_scale <- scale(areas_allcusps_lwr_df_final)
+areas_allcusps_upr_df_final_scale <- scale(areas_allcusps_upr_df_final)
+areas_4cusps_lwr_df_final_scale <- scale(areas_4cusps_lwr_df_final)
+areas_4cusps_upr_df_final_scale <- scale(areas_4cusps_upr_df_final)
+
+library(factoextra)
+
+hca_areas <- function(data, title, n_clusters) {
+  # Dissimilarity matrix
+  d <- dist(data, method = "euclidean")
+  # HCA
+  hca <- hclust(d, method = "ward.D2" )
+  # Number of grups
+  k_groups <- n_clusters
+  # Colors of the groups
+  # Wether the plot should be saved as SVG file or not
+  if(n_clusters == 2) {
+    k_colors_grups <- c("#9E9AC8", "#3F007D")
+  }
+  if(n_clusters == 3) {
+    k_colors_grups <- c("#9E9AC8", "#6A51A3", "#3F007D")
+  } 
+  if(n_clusters == 4) {
+    k_colors_grups <- c("#DADAEB", "#9E9AC8", "#6A51A3", "#3F007D")
+  } 
+    if(n_clusters == 5) {
+    k_colors_grups <- c("#DADAEB", "#9E9AC8", "#6A51A3", "#3F007D", "#2A0053")
+  } 
+  # Cut tree into 3 groups
+  sub_grp <- cutree(hca, k = k_groups)
+  # ggplot 1 - PC
+  fvizplot  <- fviz_cluster(list(data = data, cluster = sub_grp),
+                            repel = F,
+                            labelsize = 0) +
+    ggtitle(title) + 
+    theme_minimal() + 
+    scale_fill_manual(values = k_colors_grups) + 
+    scale_color_manual(values = k_colors_grups) +
+    scale_x_reverse() +
+    scale_y_reverse()
+  
+  # ggplot 2 - DENDROGRAM
+  fviz_dendplot <- fviz_dend(hca, k = k_groups, # Cut in groups
+          cex = 0.4, # label size
+          k_colors = k_colors_grups,
+          color_labels_by_k = TRUE, # color labels by groups
+          type = "rectangle",
+          rect = TRUE,
+          horiz = TRUE) + # Add rectangle around groups
+  # ggtitle(title) + 
+    theme_minimal()
+    
+  # Create list
+  return(list(HCA = hca, 
+              fvizplot = fvizplot, 
+              fviz_dendplot = fviz_dendplot))
+}
+
+all_lwr_3 <- hca_areas(areas_allcusps_lwr_df_final_scale, "Lower - All cusps", n_clusters = 3)
+all_upr_3 <- hca_areas(areas_allcusps_upr_df_final_scale, "Upper - All cusps", n_clusters = 3)
+four_lwr_3 <- hca_areas(areas_4cusps_lwr_df_final_scale, "Lower - 4 cusps",    n_clusters = 3)
+four_upr_3 <- hca_areas(areas_4cusps_upr_df_final_scale, "Upper - 4 cusps",    n_clusters = 3)
+
+all_lwr_2 <- hca_areas(areas_allcusps_lwr_df_final_scale, "Lower - All cusps", n_clusters = 2)
+all_upr_2 <- hca_areas(areas_allcusps_upr_df_final_scale, "Upper - All cusps", n_clusters = 2)
+four_lwr_2 <- hca_areas(areas_4cusps_lwr_df_final_scale, "Lower - 4 cusps",    n_clusters = 2)
+four_upr_2 <- hca_areas(areas_4cusps_upr_df_final_scale, "Upper - 4 cusps",    n_clusters = 2)
+
+all_lwr_4 <- hca_areas(areas_allcusps_lwr_df_final_scale, "Lower - All cusps", n_clusters = 4)
+all_upr_4 <- hca_areas(areas_allcusps_upr_df_final_scale, "Upper - All cusps", n_clusters = 4)
+four_lwr_4 <- hca_areas(areas_4cusps_lwr_df_final_scale, "Lower - 4 cusps",    n_clusters = 4)
+four_upr_4 <- hca_areas(areas_4cusps_upr_df_final_scale, "Upper - 4 cusps",    n_clusters = 4)
+
+four_upr_5 <- hca_areas(areas_4cusps_upr_df_final_scale, "Upper - 4 cusps",    n_clusters = 5)
+
+
+# OPTIMAL NUMBER OF CLUSTERS
+# https://remiller1450.github.io/s230s19/clustering_tutorial.html
+fviz_nbclust(areas_allcusps_lwr_df_final_scale, kmeans, method = "silhouette", k.max = 8)
+fviz_nbclust(areas_allcusps_upr_df_final_scale, kmeans, method = "silhouette", k.max = 8)
+fviz_nbclust(areas_4cusps_lwr_df_final_scale,   kmeans, method = "silhouette", k.max = 8)
+fviz_nbclust(areas_4cusps_upr_df_final_scale,   kmeans, method = "silhouette", k.max = 8)
+
+# LET'S DO WITH 2 CLUSTERS
+
+# pca http://factominer.free.fr/factomethods/principal-components-analysis.html
+
+library(FactoMineR)
+res.pca_allcusps_lwr = PCA(areas_allcusps_lwr_df_final_scale, scale.unit=FALSE, ncp=5, graph=T)
+res.pca_allcusps_upr = PCA(areas_allcusps_upr_df_final_scale, scale.unit=FALSE, ncp=5, graph=T)
+res.pca_4cusps_lwr   = PCA(areas_4cusps_lwr_df_final_scale,   scale.unit=FALSE, ncp=5, graph=T)
+res.pca_4cusps_upr   = PCA(areas_4cusps_upr_df_final_scale,   scale.unit=FALSE, ncp=5, graph=T)
+
+res.pca_4cusps_lwr$var
+# plot with 4cusps lwr.
+```
+
+fviz_cluster {factoextra}
+
+Provides ggplot2-based elegant visualization of partitioning methods including kmeans [stats package]; pam, clara and fanny [cluster package]; dbscan [fpc package]; Mclust [mclust package]; HCPC [FactoMineR]; hkmeans [factoextra]. Observations are represented by points in the plot, using principal components if ncol(data) > 2. An ellipse is drawn around each cluster.
+
+fviz_dend {factoextra}
+Draws easily beautiful dendrograms using either R base plot or ggplot2. Provides also an option for drawing a circular dendrogram and phylogenic trees.
+
+
+```{r echo=FALSE, fig.height=8, fig.width=10, message=FALSE, warning=FALSE}
+library(ggpubr)
+cuspareasPC_3 <- ggarrange(
+  all_upr_3$fvizplot,
+  all_lwr_3$fvizplot,
+  four_upr_3$fvizplot,
+  four_lwr_3$fvizplot
+  )
+cuspareasPC_3
+
+cuspareasPC_2 <- ggarrange(
+  all_upr_2$fvizplot,
+  all_lwr_2$fvizplot,
+  four_upr_2$fvizplot,
+  four_lwr_2$fvizplot
+  )
+cuspareasPC_2
+
+cuspareasPC_4 <- ggarrange(
+  all_upr_4$fvizplot,
+  all_lwr_4$fvizplot,
+  four_upr_4$fvizplot,
+  four_lwr_4$fvizplot
+  )
+cuspareasPC_4
+```
+
+```{r}
+# OPTIMAL NUMBER OF CLUSTERS
+# https://remiller1450.github.io/s230s19/clustering_tutorial.html
+ggarrange(fviz_nbclust(areas_allcusps_lwr_df_final_scale, kmeans, method = "silhouette", k.max = 8),
+          all_lwr_2$fviz_dendplot, ncol = 1)
+
+ggarrange(fviz_nbclust(areas_allcusps_upr_df_final_scale, kmeans, method = "silhouette", k.max = 8),
+          all_upr_4$fviz_dendplot, ncol = 1)
+
+ggarrange(fviz_nbclust(areas_4cusps_lwr_df_final_scale,   kmeans, method = "silhouette", k.max = 8),
+          four_lwr_3$fviz_dendplot, ncol = 1)
+
+ggarrange(fviz_nbclust(areas_4cusps_upr_df_final_scale,   kmeans, method = "silhouette", k.max = 8),
+          four_upr_5$fviz_dendplot, ncol = 1)
+```
+
+
+```{r eval=FALSE, fig.height=8, fig.width=10, message=FALSE, warning=FALSE, include=FALSE}
+ggpubr::ggarrange(
+  all_upr$fviz_dendplot,
+  all_lwr$fviz_dendplot,
+  four_upr$fviz_dendplot,
+  four_lwr$fviz_dendplot
+  )
+```
+
+Calculates p-values for hierarchical clustering via multiscale bootstrap resampling. Hierarchical clustering is done for given data and p-values are computed for each of the clusters.
+
+```{r eval=FALSE, fig.height=6, fig.width=10, message=FALSE, warning=FALSE, include=FALSE}
+# pvclust with probabilities
+# https://github.com/shimo-lab/pvclust
+library(pvclust)
+result_all_lwr <- pvclust(t(areas_allcusps_lwr_df_final_scale), method.dist="cor", method.hclust="ward.D2", nboot=1000, parallel=TRUE)
+plot(result_all_lwr, h=-1, sub = "Lower - All cusps")
+pvrect(result_all_lwr, alpha=0.95)
+
+result_all_upr <- pvclust(t(areas_allcusps_upr_df_final_scale), method.dist="cor", method.hclust="ward.D2", nboot=1000, parallel=TRUE)
+plot(result_all_upr, h=-1, sub = "Upper - All cusps")
+pvrect(result_all_upr, alpha=0.95)
+
+result_four_lwr <- pvclust(t(areas_4cusps_lwr_df_final_scale), method.dist="cor", method.hclust="ward.D2", nboot=1000, parallel=TRUE)
+plot(result_four_lwr, h=-1, sub = "Lower - 4 cusps")
+pvrect(result_four_lwr, alpha=0.95)
+
+result_four_upr <- pvclust(t(areas_4cusps_upr_df_final_scale), method.dist="cor", method.hclust="ward.D2", nboot=1000, parallel=TRUE)
+plot(result_four_upr, h=-1, sub = "Upper - 4 cusps")
+pvrect(result_four_upr, alpha=0.95)
+```
+
+## Tanglegram
+
+Comparison between the two dendrograms (with four and all cusps). The output displays “unique” nodes, with a combination of labels/items not present in the other tree, highlighted with dashed lines. The quality of the alignment of the two trees can be measured using the function entanglement. Entanglement is a measure between 1 (full entanglement) and 0 (no entanglement). A lower entanglement coefficient corresponds to a good alignment.
+
+Calculate the optimal number of clusters in each dendrogram with the average silhouette method. Then we conduct hierarchical cluster analysis with multiscale bootstrap with number of bootstrap 1000, using Ward D2 method and correlation-based dissimilarity matrix as follows:
+
+```{r tanglegram, eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+dend_all_lwr <- as.dendrogram (all_lwr$HCA)
+dend_four_lwr <- as.dendrogram (four_lwr$HCA)
+dend_all_upr <- as.dendrogram (all_upr$HCA)
+dend_four_upr <- as.dendrogram (four_upr$HCA)
+
+library(dendextend)
+tanglegram_areas <- function(data1, data2, tit_izq, tit_der) {
+  dend_list <- dendlist(data1, data2)
+  tanglegram(data1, data2, 
+                         lwd = 1.2,
+                         sort = TRUE,
+                         common_subtrees_color_branches = TRUE,
+                         highlight_distinct_edges  = TRUE,
+                         highlight_branches_lwd=FALSE,
+                         common_subtrees_color_lines = TRUE,
+                         lab.cex = 0.38,
+                         main_left = tit_izq,
+                         main_right = tit_der,
+                         main = paste("entanglement =", round(entanglement(dend_list), 2)))
+}
+
+tanglegram_areas(dend_all_upr, dend_four_upr, "All cusps Upper", "4 cusps Upper") # upper
+tanglegram_areas(dend_all_lwr, dend_four_lwr, "All cusps Lower", "4 cusps Lower") # lower
+```
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+library(ggpubr)
+library(dendextend)
+ggarrange(
+  fviz_nbclust(areas_allcusps_upr_df_final_scale, FUN = hcut, method = "silhouette") + ggtitle("Upper - All cusps"),
+  fviz_nbclust(areas_4cusps_upr_df_final_scale,   FUN = hcut, method = "silhouette", linecolor = "darkred") + ggtitle("Upper - 4 cusps"),
+  fviz_nbclust(areas_allcusps_lwr_df_final_scale, FUN = hcut, method = "silhouette") + ggtitle("Lower - All cusps"),
+  fviz_nbclust(areas_4cusps_lwr_df_final_scale,   FUN = hcut, method = "silhouette", linecolor = "darkred") + ggtitle("Lower - 4 cusps")
+  )
+```
+
+
